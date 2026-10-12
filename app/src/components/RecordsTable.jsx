@@ -7,12 +7,16 @@ import {
   Copy,
   Download,
   Eye,
+  FileText,
   X,
   Loader2,
   MoreHorizontal,
   Pencil,
   Printer,
   RefreshCw,
+  Send,
+  Share2,
+  SlidersHorizontal,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -74,6 +78,7 @@ export default function RecordsTable({
   restoring = false,
   search = '',
   onSearchChange,
+  flashId = null,
 }) {
   const [sort, setSort] = useState({ key: null, dir: 1 })
   const [page, setPage] = useState(0)
@@ -81,6 +86,7 @@ export default function RecordsTable({
   const [printing, setPrinting] = useState(false)
   const [colsOpen, setColsOpen] = useState(false)
   const [swipedId, setSwipedId] = useState(null)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [detailRow, setDetailRow] = useState(null)
   const headingRef = useRef(null)
   const [hiddenCols, setHiddenCols] = useState(() => {
@@ -93,6 +99,7 @@ export default function RecordsTable({
   })
   const colsRef = useRef(null)
   const touchRef = useRef({})
+  const [theadShadow, setTheadShadow] = useState(false)
 
   useEffect(() => {
     const before = () => flushSync(() => setPrinting(true))
@@ -163,6 +170,29 @@ export default function RecordsTable({
       return cmp * sort.dir
     })
   }, [records, sort])
+
+  // Map of chronological records to identify opening adjustments (audit trail)
+  const adjustedIds = useMemo(() => {
+    const sortedChronological = [...records].sort((a, b) => {
+      const dComp = (a.balance_date || '').localeCompare(b.balance_date || '')
+      if (dComp !== 0) return dComp
+      return (a.created_at || '').localeCompare(b.created_at || '')
+    })
+    const lastClosingByMerchant = {}
+    const adjusted = new Set()
+    for (const r of sortedChronological) {
+      const m = r.merchant_name || ''
+      if (lastClosingByMerchant[m] !== undefined) {
+        const expected = lastClosingByMerchant[m]
+        const actual = toNumber(r.opening_balance)
+        if (Math.abs(expected - actual) > 0.01) {
+          adjusted.add(r.id)
+        }
+      }
+      lastClosingByMerchant[m] = toNumber(r.closing_balance)
+    }
+    return adjusted
+  }, [records])
 
   const totals = useMemo(
     () =>
@@ -241,7 +271,22 @@ export default function RecordsTable({
           </span>
         ),
       },
-      { id: 'opening', label: 'Opening', sort: 'opening', hideable: true, cell: (r) => fmt(r.opening_balance, currency) },
+      {
+        id: 'opening',
+        label: 'Opening',
+        sort: 'opening',
+        hideable: true,
+        cell: (r) => (
+          <span className="opening-cell">
+            {fmt(r.opening_balance, currency)}
+            {adjustedIds.has(r.id) && (
+              <span className="adj-badge" data-tip="Opening differs from previous closing balance">
+                Adj
+              </span>
+            )}
+          </span>
+        ),
+      },
       { id: 'cashIn', label: 'Cash In', sort: 'cashIn', hideable: true, cell: (r) => fmt(r.cash_in, currency) },
       { id: 'cashOut', label: 'Cash Out', sort: 'cashOut', hideable: true, cell: (r) => (toNumber(r.cash_out) ? <span className="neg">−{fmt(Math.abs(toNumber(r.cash_out)), currency)}</span> : fmt(0, currency)) },
       { id: 'misc', label: 'Misc Exp', sort: 'misc', hideable: true, cell: (r) => fmt(r.misc_expense, currency) },
@@ -313,6 +358,146 @@ export default function RecordsTable({
     URL.revokeObjectURL(url)
   }
 
+  const exportMerchantPdf = async (merchantName) => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ])
+    const mRows = records
+      .filter((r) => r.merchant_name === merchantName)
+      .sort((a, b) => (a.balance_date || '').localeCompare(b.balance_date || ''))
+    if (!mRows.length) return
+
+    const pdfCur = currency === '₹' ? 'Rs ' : `${currency} `
+    const money = (v) => `${pdfCur}${toNumber(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    const doc = new jsPDF()
+
+    doc.setFontSize(16)
+    doc.text(`Statement: ${merchantName}`, 14, 15)
+    doc.setFontSize(9)
+    doc.setTextColor(110)
+    doc.text(`Generated ${new Date().toLocaleString()} · ${mRows.length} entries recorded`, 14, 21)
+
+    const mTotals = mRows.reduce(
+      (acc, r) => ({
+        cashIn: acc.cashIn + toNumber(r.cash_in),
+        cashOut: acc.cashOut + toNumber(r.cash_out),
+        misc: acc.misc + toNumber(r.misc_expense),
+        change: acc.change + changeOf(r),
+      }),
+      { cashIn: 0, cashOut: 0, misc: 0, change: 0 }
+    )
+
+    autoTable(doc, {
+      startY: 26,
+      head: [['Date', 'Type', 'Opening', 'Cash In', 'Cash Out', 'Misc', 'Closing', 'Net Change']],
+      body: mRows.map((r) => [
+        r.balance_date,
+        TYPE_LABELS[r.entry_type] || r.entry_type || 'Daily',
+        money(r.opening_balance),
+        money(r.cash_in),
+        money(r.cash_out),
+        money(r.misc_expense),
+        money(r.closing_balance),
+        money(changeOf(r)),
+      ]),
+      foot: [[
+        'Total', '', '',
+        money(mTotals.cashIn),
+        money(mTotals.cashOut),
+        money(mTotals.misc),
+        '',
+        money(mTotals.change),
+      ]],
+      styles: { fontSize: 8.5, cellPadding: 3 },
+      headStyles: { fillColor: [79, 70, 229] },
+      footStyles: { fillColor: [238, 242, 255], textColor: [30, 41, 59], fontStyle: 'bold' },
+      columnStyles: {
+        2: { halign: 'right' },
+        3: { halign: 'right' },
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+        6: { halign: 'right' },
+        7: { halign: 'right' },
+      },
+    })
+    doc.save(`statement-${merchantName.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
+
+  const shareMerchantWhatsApp = (merchantName) => {
+    const mRows = records
+      .filter((r) => r.merchant_name === merchantName)
+      .sort((a, b) => (b.balance_date || '').localeCompare(a.balance_date || ''))
+    if (!mRows.length) return
+    const latest = mRows[0]
+    const mTotals = mRows.reduce(
+      (acc, r) => ({
+        cashIn: acc.cashIn + toNumber(r.cash_in),
+        cashOut: acc.cashOut + toNumber(r.cash_out),
+        misc: acc.misc + toNumber(r.misc_expense),
+        change: acc.change + changeOf(r),
+      }),
+      { cashIn: 0, cashOut: 0, misc: 0, change: 0 }
+    )
+
+    const text = [
+      `*Merchant Daily Balance Statement*`,
+      `Merchant: *${merchantName}*`,
+      `Latest Date: ${latest.balance_date}`,
+      `Closing Balance: ${fmt(latest.closing_balance, currency)}`,
+      `Total Net Change: ${mTotals.change >= 0 ? '+' : '−'}${fmt(Math.abs(mTotals.change), currency)}`,
+      `Total Cash In: ${fmt(mTotals.cashIn, currency)}`,
+      `Total Cash Out: ${fmt(mTotals.cashOut, currency)}`,
+      `Entries Count: ${mRows.length}`,
+    ].join('\n')
+
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+  }
+
+  const exportPdf = async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ])
+    const pdfCur = currency === '₹' ? 'Rs ' : `${currency} ` // jsPDF default fonts lack the ₹ glyph
+    const money = (v) => `${pdfCur}${toNumber(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    const doc = new jsPDF({ orientation: 'landscape' })
+    doc.setFontSize(15)
+    doc.text('Merchant Daily Balance', 14, 15)
+    doc.setFontSize(9)
+    doc.setTextColor(110)
+    doc.text(
+      `Generated ${new Date().toLocaleString()} · ${rangeLabel}${filters.merchant ? ` · ${filters.merchant}` : ''}${search.trim() ? ` · search: ${search.trim()}` : ''}`,
+      14,
+      21
+    )
+    autoTable(doc, {
+      startY: 25,
+      head: [['Date', 'Merchant', 'Type', 'Opening', 'Cash In', 'Cash Out', 'Misc', 'Closing', 'Change', 'Notes']],
+      body: sorted.map((r) => [
+        r.balance_date,
+        r.merchant_name,
+        TYPE_LABELS[r.entry_type] || r.entry_type || 'Daily',
+        money(r.opening_balance),
+        money(r.cash_in),
+        money(r.cash_out),
+        money(r.misc_expense),
+        money(r.closing_balance),
+        money(changeOf(r)),
+        r.notes || '',
+      ]),
+      foot: [[
+        'Total', '', '', '',
+        money(totals.cashIn), money(totals.cashOut), money(totals.misc), '', money(totals.change), '',
+      ]],
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [79, 70, 229] },
+      footStyles: { fillColor: [238, 242, 255], textColor: [30, 41, 59], fontStyle: 'bold' },
+      columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' }, 8: { halign: 'right' } },
+    })
+    doc.save(`balances-${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
+
   const presets = rangePresets()
   const matchesPreset = (k) => presets[k]?.[0] === filters.from && presets[k]?.[1] === filters.to
   const activePreset = (filters.preset && matchesPreset(filters.preset) ? filters.preset : Object.keys(presets).find(matchesPreset)) || null
@@ -373,7 +558,10 @@ export default function RecordsTable({
         </div>
       </div>
       <>
-          <div className="toolbar no-print">
+          <button type="button" className="secondary filters-toggle no-print" aria-expanded={filtersOpen} aria-controls="record-filters" onClick={() => setFiltersOpen((o) => !o)}>
+            <SlidersHorizontal size={15} /> Filters <ChevronDown size={15} className={filtersOpen ? 'flip' : ''} />
+          </button>
+          <div className={`toolbar no-print${filtersOpen ? ' open' : ''}`} id="record-filters">
             <label>
               Merchant
               <Select label="Filter by merchant"
@@ -417,6 +605,19 @@ export default function RecordsTable({
               <button type="button" className="secondary" data-tip="Download as CSV" onClick={exportCsv} disabled={!records.length}>
                 <Download size={14} /> Export CSV
               </button>
+              <button type="button" className="secondary" data-tip="Download as PDF" onClick={exportPdf} disabled={!records.length}>
+                <FileText size={14} /> Export PDF
+              </button>
+              {filters.merchant && (
+                <button type="button" className="secondary" data-tip="Download statement for filtered merchant" onClick={() => exportMerchantPdf(filters.merchant)}>
+                  <FileText size={14} /> Merchant Statement
+                </button>
+              )}
+              {filters.merchant && (
+                <button type="button" className="secondary" data-tip="Share merchant statement on WhatsApp" onClick={() => shareMerchantWhatsApp(filters.merchant)}>
+                  <Share2 size={14} /> WhatsApp Statement
+                </button>
+              )}
               <button type="button" className="secondary" data-tip="Download JSON backup" onClick={onBackup}>
                 <Download size={14} /> Backup
               </button>
@@ -442,7 +643,7 @@ export default function RecordsTable({
           )}
           {search.trim() && <p className="search-summary">Search results for “{search.trim()}” within loaded records.</p>}
 
-          <div className="table-wrap">
+          <div className={`table-wrap${theadShadow ? ' scrolled' : ''}`} onScroll={(e) => setTheadShadow(e.currentTarget.scrollTop > 2)}>
             <table>
               <thead>
                 <tr>
@@ -489,10 +690,10 @@ export default function RecordsTable({
                     </td>
                   </tr>
                 ) : (
-                  pageRows.map((row) => {
+                  pageRows.map((row, i) => {
                     const rowClass = row.id === bestId ? 'row-best' : row.id === worstId ? 'row-worst' : ''
                     return (
-                      <tr key={row.id} className={rowClass}>
+                      <tr key={row.id} className={`${rowClass}${row.id === flashId ? ' row-flash' : ''}`} style={{ animationDelay: `${Math.min(i * 20, 320)}ms` }}>
                         {visCols.map((c) => (
                           <td key={c.id} className={cellClass(c)}>
                             {c.cell(row)}
@@ -534,14 +735,15 @@ export default function RecordsTable({
                     <div className="skel" style={{ width: '80%' }} />
                   </div>
                 ))
-              : pageRows.map((row) => {
+              : pageRows.map((row, i) => {
                   const change = changeOf(row)
                   const rcClass =
                     row.id === bestId ? 'rc-best' : row.id === worstId ? 'rc-worst' : ''
                   return (
                     <div
                       key={row.id}
-                      className={`record-card ${rcClass} ${swipedId === row.id ? 'swiped' : ''}`}
+                      style={{ animationDelay: `${Math.min(i * 20, 320)}ms` }}
+                      className={`record-card ${rcClass} ${swipedId === row.id ? 'swiped' : ''} ${row.id === flashId ? 'row-flash' : ''}`}
                       onTouchStart={touchStart(row.id)}
                       onTouchMove={touchMove}
                       onTouchEnd={touchEnd}
@@ -555,25 +757,23 @@ export default function RecordsTable({
                       >
                         <div className="rc-head">
                           <span className="merchant-cell"><MerchantAvatar name={row.merchant_name} /><b>{row.merchant_name}</b></span>
-                          <span className="muted">{row.balance_date}</span>
+                          <b className={`rc-change ${change >= 0 ? 'pos' : 'neg'}`}>
+                            {change >= 0 ? '+' : '−'}
+                            {fmt(Math.abs(change), currency)}
+                          </b>
                         </div>
                         <div className="rc-nums">
+                          <span className="muted">{row.balance_date}</span>
                           <span>
                             Open <b>{fmt(row.opening_balance, currency)}</b>
+                            {adjustedIds.has(row.id) && <span className="adj-badge" data-tip="Opening differs from previous closing">Adj</span>}
                           </span>
                           <span>
                             Close <b>{fmt(row.closing_balance, currency)}</b>
                           </span>
-                          <span>
-                            Change{' '}
-                            <b className={change >= 0 ? 'pos' : 'neg'}>
-                              {change >= 0 ? '+' : '−'}
-                              {fmt(Math.abs(change), currency)}
-                            </b>
-                          </span>
                         </div>
                         {row.notes && <div className="muted">{row.notes}</div>}
-                        <button type="button" className="secondary mobile-details-button" aria-haspopup="dialog" aria-label={`Details and actions for ${row.merchant_name} on ${row.balance_date}`} onClick={() => { setSwipedId(null); setDetailRow(row) }}><MoreHorizontal size={18} /> Details / Actions</button>
+                        <button type="button" className="mobile-details-button" aria-haspopup="dialog" aria-label={`Details and actions for ${row.merchant_name} on ${row.balance_date}`} onClick={() => { setSwipedId(null); setDetailRow(row) }}><MoreHorizontal size={15} /> Details / Actions</button>
                       </div>
                     </div>
                   )
@@ -616,7 +816,7 @@ export default function RecordsTable({
             )}
           </div>
       </>
-      {detailRow && <AccessibleDialog title="Record details" onClose={() => setDetailRow(null)}>
+      {detailRow && <AccessibleDialog title="Record details" className="m-sheet" onClose={() => setDetailRow(null)}>
         <p><span className="merchant-cell"><MerchantAvatar name={detailRow.merchant_name} /><strong>{detailRow.merchant_name}</strong></span> · {displayDate(detailRow.balance_date)}</p>
         <dl className="record-detail-list">
           <div><dt>Entry type</dt><dd>{TYPE_LABELS[detailRow.entry_type] || 'Daily'}</dd></div>
@@ -627,6 +827,14 @@ export default function RecordsTable({
           <div><dt>Recorded</dt><dd>{displayDate(detailRow.created_at, true)}</dd></div>
         </dl>
         <h3>Notes</h3><p className="detail-notes">{detailRow.notes || 'No notes for this entry.'}</p>
+        <div className="detail-share-actions">
+          <button type="button" className="secondary" onClick={() => exportMerchantPdf(detailRow.merchant_name)}>
+            <FileText size={15} /> Merchant PDF Statement
+          </button>
+          <button type="button" className="secondary" onClick={() => shareMerchantWhatsApp(detailRow.merchant_name)}>
+            <Share2 size={15} /> WhatsApp Summary
+          </button>
+        </div>
         <div className="actions detail-actions">
           <button type="button" className="secondary" onClick={() => detailAction(onCopy)}><Copy size={16} /> Copy</button>
           <button type="button" className="secondary" onClick={() => detailAction(onEdit)}><Pencil size={16} /> Edit</button>

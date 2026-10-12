@@ -91,6 +91,8 @@ export default function SummaryPanel({ records, currency }) {
           <ChevronDown size={16} className={collapsed ? '' : 'flip'} />
         </button>
       </div>
+      <div className={`collapse${collapsed ? ' closed' : ''}`}>
+        <div className="collapse-inner">
       {!collapsed && (
       <div className="summary-grid no-print">
         {summary.map((s, i) => (
@@ -124,6 +126,8 @@ export default function SummaryPanel({ records, currency }) {
         ))}
       </div>
       )}
+        </div>
+      </div>
     </>
   )
 }

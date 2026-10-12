@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Loader2, Save } from 'lucide-react'
+import { Check, Loader2, Plus, Save } from 'lucide-react'
 import { supabase } from '../supabase'
 import { localToday, fmt } from '../format'
 import Select from './Select'
@@ -172,6 +172,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (saving) return
+    const addAnother = e.nativeEvent.submitter?.value === 'another'
     const payload = {
       merchant_name: form.merchant.trim(),
       balance_date: form.date,
@@ -213,9 +214,16 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
         }
       }
 
-      const ok = await onSubmit(payload, editingRow?.id)
+      const ok = await onSubmit(payload, editingRow?.id, addAnother)
       if (ok) {
-        resetForm()
+        if (addAnother) {
+          closingTouched.current = false
+          setForm((f) => ({ ...blank, date: f.date }))
+          localStorage.removeItem(DRAFT_KEY)
+          formRef.current?.querySelector('.select-btn')?.focus()
+        } else {
+          resetForm()
+        }
         setPrefillTick((t) => t + 1)
         setFlash(true)
         setTimeout(() => setFlash(false), 1600)
@@ -285,7 +293,23 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
 
         <label data-tip="Money received today">
           Cash In
-          <NumInput value={form.cashIn} onChange={(v) => setForm((f) => ({ ...f, cashIn: v }))} />
+          <NumInput
+            value={form.cashIn}
+            onChange={(v) => {
+              setForm((f) => {
+                const prevCashIn = toNumber(f.cashIn)
+                const nextCashIn = toNumber(v)
+                const delta = nextCashIn - prevCashIn
+                const currentClosing = toNumber(f.closing)
+                const nextClosing = (currentClosing + delta >= 0 ? currentClosing + delta : 0).toFixed(2)
+                return {
+                  ...f,
+                  cashIn: v,
+                  closing: !f.closing && f.opening ? (toNumber(f.opening) + nextCashIn).toFixed(2) : nextClosing,
+                }
+              })
+            }}
+          />
         </label>
 
         <label data-tip="Money taken out today">
@@ -355,6 +379,12 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
             </>
           )}
         </button>
+        {!editingRow && (
+          <button type="submit" name="saveMode" value="another" className="secondary" disabled={saving}
+            data-tip="Save and keep the panel open for the next merchant">
+            <Plus size={15} /> Save & add another
+          </button>
+        )}
         <button type="button" className="secondary" disabled={saving} onClick={onClose || onCancelEdit}>
           Cancel
         </button>

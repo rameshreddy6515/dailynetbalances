@@ -16,23 +16,29 @@ import MerchantAvatar from './components/MerchantAvatar'
 import { registerSW } from './pwa'
 import {
   AlertTriangle,
+  ArrowDownToLine,
   CheckCircle2,
   ChevronDown,
+  Receipt,
   Search,
-  UserRound,
+  TrendingUp,
   Command,
   Info,
   List,
   LogOut,
+  Moon,
   Plus,
   Settings,
   SlidersHorizontal,
   Store,
+  Sun,
+  Wallet,
   X,
 } from 'lucide-react'
 import { changeOf, fmt, toNumber, CURRENCIES, localToday, latestWalletEntries, displayDate, setNumberLocale } from './format'
 
 const OPTIONAL_COLS = ['entry_type', 'misc_expense']
+const TODAY_LABEL = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
 const DEFAULT_CFG = {
   statOrder: ['wallet', 'today', 'merchants', 'entries', 'cashIn', 'misc'],
@@ -140,11 +146,13 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [dashOpen, setDashOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [entryOpen, setEntryOpen] = useState(false)
   const [entryBusy, setEntryBusy] = useState(false)
   const [entryKey, setEntryKey] = useState(0)
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
+  const [flashId, setFlashId] = useState(null)
   const [search, setSearch] = useState('')
   const entryRef = useRef(null)
   const visibleRecords = useMemo(() => {
@@ -303,23 +311,45 @@ export default function App() {
       const [h, m] = reminder.time.split(':').map(Number)
       if (now.getHours() < h || (now.getHours() === h && now.getMinutes() < m)) return
       if (localStorage.getItem('lastReminderDate') === todayStr) return
-      if (!supabase || !session || Notification.permission !== 'granted') return
 
-      const { count } = await supabase
-        .from('daily_balances')
-        .select('id', { count: 'exact', head: true })
-        .eq('balance_date', todayStr)
-      localStorage.setItem('lastReminderDate', todayStr)
-      if ((count || 0) === 0) {
-        new Notification('Merchant Daily Balance', {
-          body: `No balance entry saved for today (${todayStr}) yet.`,
+      let missing = 0
+      if (supabase && session) {
+        const { data } = await supabase
+          .from('daily_balances')
+          .select('merchant_name')
+          .eq('balance_date', todayStr)
+        const updatedMerchants = new Set((data || []).map((r) => r.merchant_name))
+        missing = merchants.filter((mName) => !updatedMerchants.has(mName)).length
+      } else {
+        const latest = latestWalletEntries(walletRows)
+        const updated = latest.filter((r) => r.balance_date === todayStr).length
+        missing = Math.max(0, merchants.length - updated)
+      }
+
+      if (missing > 0) {
+        localStorage.setItem('lastReminderDate', todayStr)
+        const title = 'Daily Balance Reminder'
+        const body = `${missing} merchant${missing === 1 ? '' : 's'} still need closing balance entries for today.`
+        
+        // Native browser/OS notification if permitted
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification(title, {
+            body,
+            icon: '/icon-192.png',
+            tag: 'daily-reminder',
+          })
+        }
+        // In-app interactive toast notification
+        notify(body, 'info', {
+          label: 'Add Entry',
+          fn: () => newEntry(),
         })
       }
     }
     const id = setInterval(check, 60000)
     check()
     return () => clearInterval(id)
-  }, [reminder, session])
+  }, [reminder, session, merchants, walletRows])
 
   const toggleReminder = async (enabled) => {
     if (enabled && 'Notification' in window && Notification.permission === 'default') {
@@ -602,7 +632,7 @@ export default function App() {
     return true
   }
 
-  const saveRecord = async (payload, editingId) => {
+  const saveRecord = async (payload, editingId, keepOpen = false) => {
     if (!payload.merchant_name || !payload.balance_date) {
       setStatus({ type: 'error', text: 'Merchant name and date are required.' })
       return false
@@ -614,8 +644,8 @@ export default function App() {
 
     const write = (p) =>
       editingId
-        ? supabase.from('daily_balances').update(p).eq('id', editingId)
-        : supabase.from('daily_balances').insert(p)
+        ? supabase.from('daily_balances').update(p).eq('id', editingId).select('id')
+        : supabase.from('daily_balances').insert(p).select('id')
 
     const dropped = []
     let result = await write(payload)
@@ -640,9 +670,13 @@ export default function App() {
     setStatus({ type: 'success', text: savedText })
     notify(savedText, 'success')
     navigator.vibrate?.(40)
-    setEntryOpen(false)
-    setEditingRow(null)
-    setCopySource(null)
+    setFlashId(editingId || result.data?.[0]?.id || null)
+    setTimeout(() => setFlashId(null), 2500)
+    if (!keepOpen) {
+      setEntryOpen(false)
+      setEditingRow(null)
+      setCopySource(null)
+    }
     await loadRecords(filters)
     await loadWallet()
     return true
@@ -810,18 +844,24 @@ export default function App() {
 
   const moneyFmt = (v) => fmt(v, currency)
   const showSkel = loading && records.length === 0
+  const todayStr = localToday()
+  const updatedToday = wallet.entries.filter((r) => r.balance_date === todayStr).length
+  const brandLine = merchants.length
+    ? `${TODAY_LABEL} · ${updatedToday} of ${merchants.length} merchant${merchants.length === 1 ? '' : 's'} updated today`
+    : 'Track opening balance, cash in/out, miscellaneous expense, and the end-of-day wallet amount per merchant.'
   const statDefs = {
-    wallet: { cls: 'stat-wallet', value: wallet.total, format: moneyFmt, lbl: 'Total Wallet' },
+    wallet: { cls: 'stat-wallet', value: wallet.total, format: moneyFmt, lbl: 'Total Wallet', icon: <Wallet size={17} className="stat-icon" aria-hidden="true" /> },
     today: {
       cls: 'stat-today',
       value: wallet.todayChange,
       format: (v) => `${v >= 0 ? '+' : ''}${fmt(v, currency)}`,
       lbl: "Today's Change",
+      icon: <TrendingUp size={17} className="stat-icon" aria-hidden="true" />,
     },
-    merchants: { cls: 'stat-1', value: stats.merchants, format: (v) => Math.round(v), lbl: 'Merchants' },
-    entries: { cls: 'stat-2', value: stats.entries, format: (v) => Math.round(v), lbl: 'Entries shown' },
-    cashIn: { cls: 'stat-3', value: stats.cashIn, format: moneyFmt, lbl: 'Total Cash In' },
-    misc: { cls: 'stat-4', value: stats.misc, format: moneyFmt, lbl: 'Total Misc Exp' },
+    merchants: { cls: 'stat-1', value: stats.merchants, format: (v) => Math.round(v), lbl: 'Merchants', icon: <Store size={17} className="stat-icon" aria-hidden="true" /> },
+    entries: { cls: 'stat-2', value: stats.entries, format: (v) => Math.round(v), lbl: 'Entries shown', icon: <List size={17} className="stat-icon" aria-hidden="true" /> },
+    cashIn: { cls: 'stat-3', value: stats.cashIn, format: moneyFmt, lbl: 'Total Cash In', icon: <ArrowDownToLine size={17} className="stat-icon" aria-hidden="true" /> },
+    misc: { cls: 'stat-4', value: stats.misc, format: moneyFmt, lbl: 'Total Misc Exp', icon: <Receipt size={17} className="stat-icon" aria-hidden="true" /> },
   }
 
   const sectionNodes = {
@@ -860,6 +900,7 @@ export default function App() {
           onBackup={backupData}
           onRestoreFile={restoreData}
           restoring={restoring}
+          flashId={flashId}
         />
       </div>
     ),
@@ -886,41 +927,20 @@ export default function App() {
       <div className="card workspace" inert={entryOpen ? true : undefined}>
         <div className="topbar no-print">
           <div className="brand">
-            <h1>Merchant Daily Balance</h1>
-            <p className="brand-sub">
-              Track opening balance, cash in/out, miscellaneous expense, and the end-of-day wallet
-              amount per merchant.
-            </p>
+            <div className="brand-row">
+              <div className="brand-mark" aria-hidden="true"><Wallet size={20} /></div>
+              <div>
+                <h1>Merchant Daily Balance</h1>
+                <span className="brand-accent" aria-hidden="true" />
+              </div>
+            </div>
+            <p className="brand-sub">{brandLine}</p>
           </div>
           <div className="header-controls">
           <div className="actions header-primary">
-            <button
-              type="button"
-              className="secondary small"
-              onClick={() => setShowMerchants(true)}
-              data-tip="Merchant settings"
-            >
-              <Settings size={14} /> Merchants
-            </button>
-            <button
-              type="button"
-              className="secondary small"
-              onClick={() => setPaletteOpen(true)}
-              data-tip="Command palette (Ctrl+K)"
-            >
-              <Command size={14} /> K
-            </button>
-            <button
-              type="button"
-              className="secondary small"
-              onClick={() => setDashOpen(true)}
-              data-tip="Customize dashboard"
-            >
-              <SlidersHorizontal size={14} /> Customize
-            </button>
             {session && (
               <details className="menu-wrap account-menu">
-                <summary className="secondary"><UserRound size={16} /> Account <ChevronDown size={14} /></summary>
+                <summary className="secondary"><MerchantAvatar name={session.user?.email || '?'} /> Account <ChevronDown size={14} /></summary>
                 <div className="menu-panel">
                   <span className="account-email">{session.user?.email}</span>
                   <button type="button" className="secondary" onClick={() => supabase.auth.signOut()}>
@@ -929,24 +949,25 @@ export default function App() {
                 </div>
               </details>
             )}
-          </div>
-          <div className="actions header-preferences">
-            <div className="reminder-group">
-              <Switch checked={reminder.enabled} onChange={toggleReminder} label="Remind me at" />
-              <input type="time" className="time-input" aria-label="Reminder time" value={reminder.time}
-                onChange={(e) => setReminder((r) => ({ ...r, time: e.target.value }))} disabled={!reminder.enabled} />
-            </div>
-            <Select label="Currency symbol" className="mini currency-sel" options={CURRENCIES.map((c) => ({ value: c, label: c }))}
-              value={currency} onChange={setCurrency} />
-            <Select label="Number format" className="mini numfmt-sel"
-              options={[{ value: 'in', label: '1,25,000' }, { value: 'us', label: '125,000' }]}
-              value={indianFmt ? 'in' : 'us'} onChange={(v) => setIndianFmt(v === 'in')} />
-            <Select label="Theme" className="mini theme-sel"
-              options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]}
-              value={theme} onChange={setTheme} />
-            <Select label="Accent color" className="mini accent-sel"
-              options={ACCENTS.map((a) => ({ value: a.value, label: a.label, node: <span className="merchant-cell"><span className="accent-dot" style={{ background: a.swatch }} />{a.label}</span> }))}
-              value={accent} onChange={setAccent} />
+            <button
+              type="button"
+              className="secondary small icon-button"
+              onClick={() => setTheme(dark ? 'light' : 'dark')}
+              data-tip={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {dark ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+            <button
+              type="button"
+              className="secondary small icon-button"
+              onClick={() => setSettingsOpen(true)}
+              data-tip="App settings"
+              aria-haspopup="dialog"
+              aria-label="Settings"
+            >
+              <Settings size={16} />
+            </button>
           </div>
           </div>
         </div>
@@ -966,12 +987,14 @@ export default function App() {
                 .map((k) => k === 'wallet' ? (
                   <button key={k} type="button" className="stat stat-wallet wallet-trigger" aria-haspopup="dialog"
                     aria-label={`Total wallet ${fmt(wallet.total, currency)}. View merchant breakdown`} onClick={() => setWalletOpen(true)}>
+                    {statDefs[k].icon}
                     <span className="num">{walletLoading ? 'Loading…' : <CountUp value={wallet.total} format={moneyFmt} />}</span>
                     <span className="lbl">Total Wallet</span>
                     <span className="stat-link">{walletError ? 'Refresh failed — view details' : 'View breakdown'}</span>
                   </button>
                 ) : (
                   <div key={k} className={`stat ${statDefs[k].cls}`}>
+                    {statDefs[k].icon}
                     <div className="num"><CountUp value={statDefs[k].value} format={statDefs[k].format} /></div>
                     <div className="lbl">{statDefs[k].lbl}</div>
                   </div>
@@ -986,6 +1009,7 @@ export default function App() {
             <input type="search" aria-label="Search loaded records by merchant, notes, or date" placeholder="Search records" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
         </div>
+        <p className="ptr-hint no-print" aria-hidden="true">↓ Pull down to refresh</p>
         {sectionNodes.records}
         <section id="analytics" className="workspace-section no-print">
           <div className="sec-head">
@@ -994,10 +1018,12 @@ export default function App() {
               {analyticsOpen ? 'Collapse' : 'Expand'} <ChevronDown size={16} />
             </button>
           </div>
-          {analyticsOpen && <div id="analytics-content">
-            {dashCfg.sectionOrder.map((k) => sectionNodes[k] && !dashCfg.sectionHidden.includes(k) && sectionNodes[k])}
-            {!loading && !visibleRecords.length && <p>No records match this view. Adjust the filters to see analytics.</p>}
-          </div>}
+          <div id="analytics-content" className={`collapse${analyticsOpen ? '' : ' closed'}`}>
+            <div className="collapse-inner">
+              {analyticsOpen && dashCfg.sectionOrder.map((k) => sectionNodes[k] && !dashCfg.sectionHidden.includes(k) && sectionNodes[k])}
+              {analyticsOpen && !loading && !visibleRecords.length && <p>No records match this view. Adjust the filters to see analytics.</p>}
+            </div>
+          </div>
         </section>
       </div>
 
@@ -1027,6 +1053,7 @@ export default function App() {
                 <div className="wallet-item">
                   <MerchantAvatar name={row.merchant_name} />
                   <div><strong>{row.merchant_name}</strong>
+                    {row.balance_date !== todayStr && <span className="stale-badge">Not updated today</span>}
                     <span>Balance date: {displayDate(row.balance_date)}</span>
                     <span>Recorded: {displayDate(row.created_at, true)}</span>
                   </div>
@@ -1101,6 +1128,55 @@ export default function App() {
         onReset={() => setDashCfg(DEFAULT_CFG)}
         onClose={() => setDashOpen(false)}
       />
+
+      {settingsOpen && (
+        <AccessibleDialog title="Settings" className="settings-sheet m-sheet" onClose={() => setSettingsOpen(false)}>
+          <div className="sheet-section">
+            <h3>Manage</h3>
+            <button type="button" className="secondary sheet-action" onClick={() => { setSettingsOpen(false); setShowMerchants(true) }}>
+              <Store size={15} /> Merchants
+            </button>
+            <button type="button" className="secondary sheet-action" onClick={() => { setSettingsOpen(false); setDashOpen(true) }}>
+              <SlidersHorizontal size={15} /> Customize dashboard
+            </button>
+            <button type="button" className="secondary sheet-action" onClick={() => { setSettingsOpen(false); setPaletteOpen(true) }}>
+              <Command size={15} /> Command palette <span className="kbd-hint">Ctrl K</span>
+            </button>
+          </div>
+          <div className="sheet-section">
+            <h3>Reminders</h3>
+            <div className="reminder-group">
+              <Switch checked={reminder.enabled} onChange={toggleReminder} label="Remind me at" />
+              <input type="time" className="time-input" aria-label="Reminder time" value={reminder.time}
+                onChange={(e) => setReminder((r) => ({ ...r, time: e.target.value }))} disabled={!reminder.enabled} />
+            </div>
+          </div>
+          <div className="sheet-section">
+            <h3>Display</h3>
+            <div className="prefs-grid">
+              <label>Currency
+                <Select label="Currency symbol" options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+                  value={currency} onChange={setCurrency} />
+              </label>
+              <label>Number format
+                <Select label="Number format"
+                  options={[{ value: 'in', label: '1,25,000' }, { value: 'us', label: '125,000' }]}
+                  value={indianFmt ? 'in' : 'us'} onChange={(v) => setIndianFmt(v === 'in')} />
+              </label>
+              <label>Theme
+                <Select label="Theme"
+                  options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]}
+                  value={theme} onChange={setTheme} />
+              </label>
+              <label>Accent
+                <Select label="Accent color"
+                  options={ACCENTS.map((a) => ({ value: a.value, label: a.label, node: <span className="merchant-cell"><span className="accent-dot" style={{ background: a.swatch }} />{a.label}</span> }))}
+                  value={accent} onChange={setAccent} />
+              </label>
+            </div>
+          </div>
+        </AccessibleDialog>
+      )}
 
       {confirmState && (
         <ConfirmDialog

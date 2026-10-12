@@ -102,6 +102,8 @@ export default function ChartsPanel({ records, currency, loading }) {
           <ChevronDown size={16} className={collapsed ? '' : 'flip'} />
         </button>
       </div>
+      <div className={`collapse${collapsed ? ' closed' : ''}`}>
+        <div className="collapse-inner">
       {!collapsed && (
     <div className="charts-grid no-print">
       <div className="chart-card">
@@ -177,6 +179,8 @@ export default function ChartsPanel({ records, currency, loading }) {
       </div>
     </div>
       )}
+        </div>
+      </div>
     </>
   )
 }
