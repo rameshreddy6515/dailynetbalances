@@ -73,13 +73,13 @@ export default function DatePicker({ value, onChange, placeholder = 'Pick a date
       {open && (
         <div className="dp-panel" id={panelId} role="group" aria-label={`Choose ${label.toLowerCase()}`}>
           <div className="dp-head">
-            <button type="button" className="dp-nav" aria-label="Previous month" onClick={() => setView(new Date(y, m - 1, 1))}>
+            <button type="button" className="dp-nav" aria-label="Previous month" onPointerDown={(e) => { e.preventDefault(); setView(new Date(y, m - 1, 1)) }} onClick={() => setView(new Date(y, m - 1, 1))}>
               <ChevronLeft size={15} />
             </button>
             <span className="dp-title" aria-live="polite">
               {MONTHS[m]} {y}
             </span>
-            <button type="button" className="dp-nav" aria-label="Next month" onClick={() => setView(new Date(y, m + 1, 1))}>
+            <button type="button" className="dp-nav" aria-label="Next month" onPointerDown={(e) => { e.preventDefault(); setView(new Date(y, m + 1, 1)) }} onClick={() => setView(new Date(y, m + 1, 1))}>
               <ChevronRight size={15} />
             </button>
           </div>
@@ -102,6 +102,7 @@ export default function DatePicker({ value, onChange, placeholder = 'Pick a date
                   aria-pressed={value === iso(y, m, d)}
                   aria-current={iso(y, m, d) === todayStr ? 'date' : undefined}
                   onKeyDown={(e) => navigateDay(e, d)}
+                  onPointerDown={(e) => { e.preventDefault(); choose(iso(y, m, d)) }}
                   onClick={() => choose(iso(y, m, d))}
                 >
                   {d}
@@ -114,11 +115,12 @@ export default function DatePicker({ value, onChange, placeholder = 'Pick a date
           <button
             type="button"
             className="dp-today"
+            onPointerDown={(e) => { e.preventDefault(); choose(todayStr) }}
             onClick={() => choose(todayStr)}
           >
             Today
           </button>
-          {!required && value && <button type="button" className="dp-today" onClick={() => choose('')}>Clear date</button>}
+          {!required && value && <button type="button" className="dp-today" onPointerDown={(e) => { e.preventDefault(); choose('') }} onClick={() => choose('')}>Clear date</button>}
         </div>
       )}
     </div>

@@ -59,6 +59,7 @@ export default function Select({ options, value, onChange, placeholder = 'Select
             {filtered.map((o) => (
               <button type="button" role="option" key={o.value} aria-selected={o.value === value}
                 className={`select-item ${o.value === value ? 'active' : ''}`}
+                onPointerDown={(e) => { e.preventDefault(); onChange(o.value); close() }}
                 onClick={() => { onChange(o.value); close() }}>
                 <span>{o.node || o.label}</span>{o.value === value && <Check size={14} aria-hidden="true" />}
               </button>
