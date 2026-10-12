@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Daily Balance Form</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #f5f7fb;
+        color: #1f2937;
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 32px 16px 48px;
+      }
+      .card {
+        background: #fff;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        padding: 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+      p {
+        margin: 0 0 24px;
+        color: #6b7280;
+      }
+      form {
+        display: grid;
+        gap: 16px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      input,
+      textarea,
+      select,
+      button {
+        font: inherit;
+      }
+      input,
+      textarea,
+      select {
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 12px;
+        background: #fff;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: 2px solid #bfdbfe;
+        border-color: #60a5fa;
+      }
+      textarea {
+        min-height: 90px;
+        resize: vertical;
+      }
+      .readonly {
+        background: #f9fafb;
+      }
+      .actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .merchant-add {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: flex-end;
+      }
+      .merchant-add label {
+        flex: 1;
+        min-width: 220px;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 12px 16px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+      button[type="submit"] {
+        background: #2563eb;
+        color: #fff;
+      }
+      button.secondary {
+        background: #e5e7eb;
+        color: #111827;
+      }
+      button.danger {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      button.small {
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      .hint {
+        font-size: 13px;
+        color: #6b7280;
+      }
+      .section {
+        margin-top: 24px;
+      }
+      .section h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 12px;
+        align-items: end;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .toolbar label {
+        flex: 1;
+        min-width: 220px;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 960px;
+      }
+      thead {
+        background: #f9fafb;
+      }
+      th,
+      td {
+        padding: 12px 14px;
+        text-align: left;
+        border-bottom: 1px solid #e5e7eb;
+        vertical-align: top;
+        font-size: 14px;
+      }
+      th {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6b7280;
+      }
+      tbody tr:hover {
+        background: #f9fafb;
+      }
+      .row-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .empty {
+        padding: 18px 14px;
+        color: #6b7280;
+        text-align: center;
+      }
+      .muted {
+        color: #6b7280;
+        font-size: 13px;
+        margin-top: 10px;
+      }
+      .message {
+        padding: 12px 14px;
+        border-radius: 10px;
+        display: none;
+      }
+      .message.success {
+        display: block;
+        background: #ecfdf5;
+        color: #065f46;
+      }
+      .message.error {
+        display: block;
+        background: #fef2f2;
+        color: #991b1b;
+      }
+      .message.info {
+        display: block;
+        background: #eff6ff;
+        color: #1d4ed8;
+      }
+      .calc {
+        padding: 12px 14px;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 10px;
+        font-weight: 700;
+      }
+      code {
+        background: #f3f4f6;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+      @media (max-width: 640px) {
+        .card {
+          padding: 18px;
+        }
+        h1 {
+          font-size: 24px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Merchant Daily Balance</h1>
+        <p>Track opening balance, cash in, cash out, and the closing balance for each merchant every day.</p>
+
+        <div id="status" class="message"></div>
+        <div id="editBanner" class="message info" hidden></div>
+
+        <form id="balanceForm">
+          <div class="grid">
+            <label>
+              Merchant name
+              <select id="merchant_name" name="merchant_name" required>
+                <option value="">Loading merchants...</option>
+              </select>
+            </label>
+
+            <label>
+              Date
+              <input id="balance_date" name="balance_date" type="date" required />
+            </label>
+          </div>
+
+          <div class="grid">
+            <label>
+              Opening balance
+              <input id="opening_balance" name="opening_balance" type="number" step="0.01" min="0" value="0" required />
+            </label>
+
+            <label>
+              Miscellaneous expense
+              <input id="misc_expense" name="misc_expense" type="number" step="0.01" min="0" value="0" required />
+            </label>
+
+            <label>
+              End of day amount
+              <input id="closing_balance" name="closing_balance" type="number" step="0.01" min="0" value="0" required />
+            </label>
+          </div>
+
+          <div class="calc">
+            Today change: <span id="closingPreview">0.00</span>
+            <div class="muted">Wallet change (End of day − Opening): <span id="walletChange">0.00</span></div>
+          </div>
+
+          <label>
+            Notes
+            <textarea id="notes" name="notes" placeholder="Optional remarks"></textarea>
+          </label>
+
+          <div class="actions">
+            <button type="submit" id="submitBtn">Save to Supabase</button>
+            <button type="button" id="cancelEditBtn" class="secondary" hidden>Cancel Edit</button>
+            <button type="button" id="resetBtn" class="secondary">Reset</button>
+          </div>
+
+          <div class="hint">
+            Formula: <code>today change = end of day amount - opening balance + misc expense</code>. The misc expense is added back because it already reduced your wallet balance.
+          </div>
+        </form>
+
+        <div class="merchant-add" id="merchantForm">
+          <label>
+            Add new merchant
+            <input id="newMerchantName" type="text" list="merchantSuggestions" placeholder="e.g. ABC Store" />
+          </label>
+          <button type="button" id="addMerchantBtn" onclick="if(window.addMerchant){window.addMerchant();}else{var st=document.getElementById('status');st.className='message error';st.textContent='Page script not loaded. Please hard refresh with Ctrl+Shift+R.';}">Add Merchant</button>
+          <datalist id="merchantSuggestions"></datalist>
+        </div>
+
+        <div class="section">
+          <div class="toolbar">
+            <label>
+              Filter by merchant
+              <select id="merchantFilter">
+                <option value="">All merchants</option>
+              </select>
+            </label>
+            <div class="actions">
+              <button type="button" id="refreshBtn" class="secondary">Refresh</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Merchant</th>
+                  <th>Opening</th>
+                  <th>Misc Exp</th>
+                  <th>Closing</th>
+                  <th>Change</th>
+                  <th>Notes</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="balancesBody">
+                <tr>
+                  <td colspan="8" class="empty">Loading records...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="muted" id="recordsMeta"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const SUPABASE_URL = "https://gagvgxpvidxapzefhhwg.supabase.co";
+      const SUPABASE_ANON_KEY = "sb_publishable_DiKyOOsLi2zfCfzeJlh8PA_8-vxCYX3";
+
+      const statusEl = document.getElementById("status");
+      const editBannerEl = document.getElementById("editBanner");
+      const merchantNameEl = document.getElementById("merchant_name");
+      const merchantFilterEl = document.getElementById("merchantFilter");
+      const merchantSuggestionsEl = document.getElementById("merchantSuggestions");
+      const dateEl = document.getElementById("balance_date");
+      const openingEl = document.getElementById("opening_balance");
+      const miscExpenseEl = document.getElementById("misc_expense");
+      const closingEl = document.getElementById("closing_balance");
+      const closingPreviewEl = document.getElementById("closingPreview");
+      const walletChangeEl = document.getElementById("walletChange");
+      const notesEl = document.getElementById("notes");
+      const formEl = document.getElementById("balanceForm");
+      const submitBtn = document.getElementById("submitBtn");
+      const resetBtn = document.getElementById("resetBtn");
+      const cancelEditBtn = document.getElementById("cancelEditBtn");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const newMerchantNameEl = document.getElementById("newMerchantName");
+      const balancesBody = document.getElementById("balancesBody");
+      const recordsMeta = document.getElementById("recordsMeta");
+
+      const hasSupabaseConfig =
+        SUPABASE_URL !== "YOUR_SUPABASE_URL" &&
+        SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY";
+      let supabase = null;
+      try {
+        supabase = hasSupabaseConfig && window.supabase
+          ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+          : null;
+      } catch (error) {
+        console.error("Supabase init failed", error);
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      let editingRowId = null;
+      let merchantCache = [];
+
+      function toNumber(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function money(value) {
+        return Number(value || 0).toFixed(2);
+      }
+
+      function updateClosing() {
+        const opening = toNumber(openingEl.value);
+        const miscExpense = toNumber(miscExpenseEl.value);
+        const endBalance = toNumber(closingEl.value);
+        const walletChange = endBalance - opening;
+        walletChangeEl.textContent = walletChange.toFixed(2);
+        closingPreviewEl.textContent = (walletChange + miscExpense).toFixed(2);
+      }
+
+      function setMessage(type, text) {
+        statusEl.className = `message ${type}`;
+        statusEl.textContent = text;
+      }
+
+      function clearMessage() {
+        statusEl.className = "message";
+        statusEl.textContent = "";
+      }
+
+      function showEditBanner(text) {
+        editBannerEl.textContent = text;
+        editBannerEl.hidden = false;
+      }
+
+      function hideEditBanner() {
+        editBannerEl.hidden = true;
+        editBannerEl.textContent = "";
+      }
+
+      function ensureSelectValue(selectEl, value) {
+        if (!value) {
+          return;
+        }
+
+        const exists = Array.from(selectEl.options).some((option) => option.value === value);
+        if (!exists) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = value;
+          selectEl.appendChild(option);
+        }
+
+        selectEl.value = value;
+      }
+
+      function renderMerchantLists(merchantNames, selectedMerchant = "", selectedFilter = "") {
+        merchantNameEl.innerHTML = "";
+        merchantFilterEl.innerHTML = "";
+        merchantSuggestionsEl.innerHTML = "";
+
+        const merchantPlaceholder = document.createElement("option");
+        merchantPlaceholder.value = "";
+        merchantPlaceholder.textContent = "Select a merchant";
+        merchantNameEl.appendChild(merchantPlaceholder);
+
+        const filterPlaceholder = document.createElement("option");
+        filterPlaceholder.value = "";
+        filterPlaceholder.textContent = "All merchants";
+        merchantFilterEl.appendChild(filterPlaceholder);
+
+        for (const name of merchantNames) {
+          const merchantOption = document.createElement("option");
+          merchantOption.value = name;
+          merchantOption.textContent = name;
+          merchantNameEl.appendChild(merchantOption);
+
+          const filterOption = document.createElement("option");
+          filterOption.value = name;
+          filterOption.textContent = name;
+          merchantFilterEl.appendChild(filterOption);
+
+          const suggestion = document.createElement("option");
+          suggestion.value = name;
+          merchantSuggestionsEl.appendChild(suggestion);
+        }
+
+        ensureSelectValue(merchantNameEl, selectedMerchant);
+        ensureSelectValue(merchantFilterEl, selectedFilter);
+      }
+
+      function syncMerchantCache(merchantNames) {
+        const unique = [];
+        const seen = new Set();
+        for (const name of merchantNames) {
+          const trimmed = String(name || "").trim();
+          if (!trimmed || seen.has(trimmed)) continue;
+          seen.add(trimmed);
+          unique.push(trimmed);
+        }
+        merchantCache = unique;
+      }
+
+      async function loadMerchants(options = {}) {
+        const {
+          selectedMerchant = merchantNameEl.value,
+          selectedFilter = merchantFilterEl.value,
+        } = options;
+
+        if (!supabase) {
+          renderMerchantLists(merchantCache, selectedMerchant, selectedFilter);
+          return merchantCache;
+        }
+
+        const { data, error } = await supabase
+          .from("merchants")
+          .select("merchant_name")
+          .order("merchant_name", { ascending: true });
+
+        if (error) {
+          renderMerchantLists(merchantCache, selectedMerchant, selectedFilter);
+          setMessage("error", error.message);
+          return merchantCache;
+        }
+
+        const merchantNames = (data || [])
+          .map((row) => row.merchant_name)
+          .filter(Boolean);
+        syncMerchantCache(merchantNames);
+        renderMerchantLists(merchantCache, selectedMerchant, selectedFilter);
+        return merchantCache;
+      }
+
+      window.addMerchant = function addMerchant() {
+        try {
+          const merchantName = newMerchantNameEl.value.trim();
+          if (!merchantName) {
+            setMessage("error", "Enter a merchant name first.");
+            return;
+          }
+
+          ensureSelectValue(merchantNameEl, merchantName);
+          ensureSelectValue(merchantFilterEl, merchantName);
+
+          const hasSuggestion = Array.from(merchantSuggestionsEl.options).some(
+            (option) => option.value === merchantName
+          );
+          if (!hasSuggestion) {
+            const suggestion = document.createElement("option");
+            suggestion.value = merchantName;
+            merchantSuggestionsEl.appendChild(suggestion);
+          }
+
+          newMerchantNameEl.value = "";
+          setMessage("info", `Merchant "${merchantName}" added to dropdown.`);
+          window.addMerchantToSupabase && window.addMerchantToSupabase(merchantName);
+        } catch (error) {
+          setMessage("error", `Add merchant error: ${error.message || error}`);
+        }
+      };
+
+      window.addMerchantToSupabase = async function addMerchantToSupabase(merchantName) {
+        if (!merchantName || !supabase) {
+          return;
+        }
+
+        try {
+          const { error } = await supabase.from("merchants").insert({ merchant_name: merchantName });
+          if (error) {
+            setMessage("error", `Merchant is selected in the list, but could not save to Supabase: ${error.message}`);
+            return;
+          }
+
+          if (!merchantCache.includes(merchantName)) {
+            merchantCache = [...merchantCache, merchantName].sort((a, b) => a.localeCompare(b));
+          }
+          setMessage("success", "Merchant saved to the list.");
+        } catch (error) {
+          console.error(error);
+          setMessage("error", `Merchant add failed: ${error.message || error}`);
+        }
+      };
+
+      function setEmptyRow(text) {
+        balancesBody.innerHTML = `<tr><td colspan="8" class="empty">${text}</td></tr>`;
+      }
+
+      async function prefillOpeningForMerchant() {
+        const merchantName = merchantNameEl.value.trim();
+        const balanceDate = dateEl.value;
+
+        if (!supabase || !merchantName || !balanceDate || editingRowId) {
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("daily_balances")
+          .select("closing_balance, balance_date")
+          .eq("merchant_name", merchantName)
+          .lt("balance_date", balanceDate)
+          .order("balance_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (error) {
+          setMessage("error", error.message);
+          return;
+        }
+
+        const previousClose = data?.[0]?.closing_balance;
+        if (previousClose !== undefined && previousClose !== null) {
+          openingEl.value = Number(previousClose).toFixed(2);
+          updateClosing();
+        }
+      }
+
+      function enterEditMode(row) {
+        editingRowId = row.id;
+        submitBtn.textContent = "Update Row";
+        cancelEditBtn.hidden = false;
+        showEditBanner(`Editing ${row.merchant_name} on ${row.balance_date}.`);
+        merchantNameEl.value = row.merchant_name || "";
+        dateEl.value = row.balance_date || today;
+        openingEl.value = row.opening_balance ?? 0;
+        miscExpenseEl.value = row.misc_expense ?? 0;
+        closingEl.value = row.closing_balance ?? 0;
+        notesEl.value = row.notes || "";
+        updateClosing();
+        formEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      function exitEditMode({ resetForm = false } = {}) {
+        editingRowId = null;
+        submitBtn.textContent = "Save to Supabase";
+        cancelEditBtn.hidden = true;
+        hideEditBanner();
+
+        if (resetForm) {
+          formEl.reset();
+          merchantNameEl.value = "";
+          dateEl.value = today;
+          openingEl.value = "0";
+          miscExpenseEl.value = "0";
+          closingEl.value = "0";
+          notesEl.value = "";
+          newMerchantNameEl.value = "";
+          updateClosing();
+        }
+      }
+
+      function renderBalances(rows) {
+        balancesBody.innerHTML = "";
+
+        if (!rows.length) {
+          setEmptyRow(merchantFilterEl.value ? `No records for ${merchantFilterEl.value}.` : "No records yet.");
+          recordsMeta.textContent = "";
+          return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        for (const row of rows) {
+          const tr = document.createElement("tr");
+          const misc = toNumber(row.misc_expense);
+          const change = toNumber(row.closing_balance) - toNumber(row.opening_balance) + misc;
+          const values = [
+            row.balance_date ?? "",
+            row.merchant_name ?? "",
+            money(row.opening_balance),
+            money(misc),
+            money(row.closing_balance),
+            change.toFixed(2),
+            row.notes ?? "",
+          ];
+
+          for (const value of values) {
+            const td = document.createElement("td");
+            td.textContent = value;
+            tr.appendChild(td);
+          }
+
+          const actionTd = document.createElement("td");
+          const actionWrap = document.createElement("div");
+          actionWrap.className = "row-actions";
+
+          const editBtn = document.createElement("button");
+          editBtn.type = "button";
+          editBtn.className = "small secondary";
+          editBtn.textContent = "Edit";
+          editBtn.addEventListener("click", () => enterEditMode(row));
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.type = "button";
+          deleteBtn.className = "small danger";
+          deleteBtn.textContent = "Delete";
+          deleteBtn.addEventListener("click", () => deleteBalance(row));
+
+          actionWrap.appendChild(editBtn);
+          actionWrap.appendChild(deleteBtn);
+          actionTd.appendChild(actionWrap);
+          tr.appendChild(actionTd);
+
+          fragment.appendChild(tr);
+        }
+
+        balancesBody.appendChild(fragment);
+        const filterName = merchantFilterEl.value ? ` for ${merchantFilterEl.value}` : "";
+        recordsMeta.textContent = `Showing ${rows.length} record${rows.length === 1 ? "" : "s"}${filterName}.`;
+      }
+
+      async function loadBalances() {
+        if (!supabase) {
+          setEmptyRow("Connect Supabase to load saved balances.");
+          recordsMeta.textContent = "Add your Supabase URL and key to enable saved records.";
+          return;
+        }
+
+        setEmptyRow("Loading records...");
+        let query = supabase
+          .from("daily_balances")
+          .select("*");
+
+        if (merchantFilterEl.value) {
+          query = query.eq("merchant_name", merchantFilterEl.value);
+        }
+
+        const { data, error } = await query
+          .order("balance_date", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (error) {
+          setEmptyRow("Unable to load records.");
+          recordsMeta.textContent = error.message;
+          return;
+        }
+
+        renderBalances(data || []);
+      }
+
+      async function deleteBalance(row) {
+        if (!supabase) {
+          setMessage("error", "Please add your Supabase URL and anon key in the HTML file.");
+          return;
+        }
+
+        const confirmed = window.confirm(`Delete the record for ${row.merchant_name} on ${row.balance_date}?`);
+        if (!confirmed) {
+          return;
+        }
+
+        const { error } = await supabase.from("daily_balances").delete().eq("id", row.id);
+        if (error) {
+          setMessage("error", error.message);
+          return;
+        }
+
+        if (editingRowId === row.id) {
+          exitEditMode({ resetForm: true });
+        }
+
+        setMessage("success", "Row deleted.");
+        await loadBalances();
+      }
+
+      openingEl.addEventListener("input", updateClosing);
+      miscExpenseEl.addEventListener("input", updateClosing);
+      closingEl.addEventListener("input", updateClosing);
+      merchantNameEl.addEventListener("change", prefillOpeningForMerchant);
+      dateEl.addEventListener("change", prefillOpeningForMerchant);
+
+      resetBtn.addEventListener("click", () => {
+        exitEditMode({ resetForm: true });
+        clearMessage();
+      });
+
+      cancelEditBtn.addEventListener("click", () => {
+        exitEditMode({ resetForm: true });
+        clearMessage();
+      });
+
+      refreshBtn.addEventListener("click", () => {
+        loadBalances();
+      });
+
+      newMerchantNameEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          window.addMerchant();
+        }
+      });
+
+      merchantFilterEl.addEventListener("change", () => {
+        loadBalances();
+      });
+
+      formEl.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        clearMessage();
+
+        if (!supabase) {
+          setMessage("error", "Please add your Supabase URL and anon key in the HTML file.");
+          return;
+        }
+
+        const opening = toNumber(openingEl.value);
+        const miscExpense = toNumber(miscExpenseEl.value);
+        const endBalance = toNumber(closingEl.value);
+        const grossChange = endBalance - opening + miscExpense;
+
+        const payload = {
+          merchant_name: merchantNameEl.value.trim(),
+          balance_date: dateEl.value,
+          opening_balance: opening,
+          cash_in: grossChange > 0 ? grossChange : 0,
+          cash_out: miscExpense + (grossChange < 0 ? Math.abs(grossChange) : 0),
+          misc_expense: miscExpense,
+          closing_balance: endBalance,
+          notes: notesEl.value.trim() || null,
+        };
+
+        if (!payload.merchant_name || !payload.balance_date) {
+          setMessage("error", "Merchant name and date are required.");
+          return;
+        }
+
+        let miscColumnMissing = false;
+        let result = editingRowId
+          ? await supabase.from("daily_balances").update(payload).eq("id", editingRowId)
+          : await supabase.from("daily_balances").insert(payload);
+
+        if (result.error && /misc_expense/i.test(result.error.message || "")) {
+          miscColumnMissing = true;
+          delete payload.misc_expense;
+          result = editingRowId
+            ? await supabase.from("daily_balances").update(payload).eq("id", editingRowId)
+            : await supabase.from("daily_balances").insert(payload);
+        }
+
+        if (result.error) {
+          setMessage("error", result.error.message);
+          return;
+        }
+
+        const savedMerchant = payload.merchant_name;
+        const savedDate = payload.balance_date;
+        const wasEditing = Boolean(editingRowId);
+
+        exitEditMode({ resetForm: true });
+        merchantNameEl.value = savedMerchant;
+        dateEl.value = savedDate || today;
+        openingEl.value = "0";
+        miscExpenseEl.value = "0";
+        closingEl.value = "0";
+        updateClosing();
+
+        const savedText = wasEditing ? "Row updated." : "Saved successfully.";
+        setMessage("success", miscColumnMissing
+          ? `${savedText} Note: run the updated supabase.sql so misc expense is stored separately.`
+          : savedText);
+        await loadBalances();
+      });
+
+      async function init() {
+        dateEl.value = today;
+        openingEl.value = "0";
+        miscExpenseEl.value = "0";
+        closingEl.value = "0";
+        updateClosing();
+        await loadMerchants();
+        await loadBalances();
+        await prefillOpeningForMerchant();
+      }
+
+      init();
+    </script>
+  </body>
+</html>

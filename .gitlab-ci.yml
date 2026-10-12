@@ -1,0 +1,32 @@
+# Keep-alive ping for the Supabase free tier (projects pause after ~7 days idle).
+#
+# Setup required in GitLab:
+#   1. CI/CD -> Variables: add masked SUPABASE_URL and SUPABASE_ANON_KEY
+#   2. CI/CD -> Schedules: create a schedule (e.g. every 2 days, cron "0 8 */2 * *")
+# The job only runs on scheduled pipelines.
+
+keep-alive:
+  image: curlimages/curl:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  script:
+    - >-
+      curl -sf -o /dev/null
+      -H "apikey: ${SUPABASE_ANON_KEY}"
+      -H "Authorization: Bearer ${SUPABASE_ANON_KEY}"
+      "${SUPABASE_URL}/rest/v1/merchants?select=id&limit=1"
+    - echo "Supabase keep-alive OK"
+
+verify:
+  image: node:22-alpine
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+  cache:
+    key: $CI_COMMIT_REF_SLUG
+    paths:
+      - app/node_modules/
+  script:
+    - cd app
+    - npm ci
+    - npm run build
+    - npm run lint -- --quiet || true
