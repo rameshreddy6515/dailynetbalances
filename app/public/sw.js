@@ -1,5 +1,5 @@
 const CACHE = 'daily-balance-v2'
-const SHELL = ['/', '/index.html', '/manifest.webmanifest']
+const SHELL = ['./', 'index.html', 'manifest.webmanifest']
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)))
@@ -27,6 +27,6 @@ self.addEventListener('fetch', (e) => {
     .catch(() => null)
   e.waitUntil(update)
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || update.then((res) => res || caches.match('/index.html')))
+    caches.match(e.request).then((hit) => hit || update.then((res) => res || caches.match('index.html')))
   )
 })

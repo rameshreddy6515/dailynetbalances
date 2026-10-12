@@ -12,7 +12,7 @@ export function registerSW(onUpdate) {
   })
 
   navigator.serviceWorker
-    .register('/sw.js')
+    .register('sw.js')
     .then((reg) => {
       const prompt = (worker) => onUpdate?.(() => worker.postMessage('SKIP_WAITING'))
       if (reg.waiting) prompt(reg.waiting)
