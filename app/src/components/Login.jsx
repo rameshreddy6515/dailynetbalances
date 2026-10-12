@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { Eye, EyeOff, Wallet } from 'lucide-react'
 import { supabase } from '../supabase'
 
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPw, setShowPw] = useState(false)
   const [mode, setMode] = useState('signin')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
@@ -52,8 +54,11 @@ export default function Login() {
   return (
     <div className="wrap">
       <div className="card login-card">
+        <div className="login-brand" aria-hidden="true">
+          <Wallet size={26} />
+        </div>
         <h1>Merchant Daily Balance</h1>
-        <p>Sign in to manage wallet balances.</p>
+        <p className="login-sub">Sign in to manage wallet balances.</p>
         <form onSubmit={go}>
           <label>
             Email
@@ -69,14 +74,25 @@ export default function Login() {
           {mode !== 'magic' && (
             <label>
               Password
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Minimum 6 characters"
-                minLength={6}
-                required
-              />
+              <span className="pw-wrap">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Minimum 6 characters"
+                  minLength={6}
+                  required
+                />
+                <button
+                  type="button"
+                  className="pw-toggle"
+                  aria-label={showPw ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPw((s) => !s)}
+                  tabIndex={-1}
+                >
+                  {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </span>
             </label>
           )}
           <div className="actions">
@@ -91,6 +107,9 @@ export default function Login() {
             </button>
           </div>
         </form>
+        <div className="login-divider" aria-hidden="true">
+          <span>Other options</span>
+        </div>
         <div className="login-links">
           <Link m="signin">Sign in</Link>
           <Link m="signup">Create account</Link>
