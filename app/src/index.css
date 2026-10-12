@@ -709,6 +709,26 @@ code {
   flex-shrink: 0;
   border: 1px solid rgba(0, 0, 0, 0.12);
 }
+.error-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 100vh;
+  padding: 32px;
+  text-align: center;
+  color: var(--text);
+}
+.error-fallback svg { color: var(--neg); }
+.error-fallback h2 { margin: 0; }
+.error-detail {
+  max-width: 480px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  font-family: monospace;
+  font-size: 13px;
+}
 .wallet-item {
   display: flex;
   gap: 12px;
