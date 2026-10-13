@@ -16,14 +16,15 @@ import MerchantAvatar from './components/MerchantAvatar'
 import { registerSW } from './pwa'
 import {
   AlertTriangle,
-  ArrowDownToLine,
   CheckCircle2,
   ChevronDown,
+  FileText,
   Receipt,
   Search,
   TrendingUp,
   Command,
   Info,
+  Landmark,
   List,
   LogOut,
   Moon,
@@ -37,12 +38,12 @@ import {
 } from 'lucide-react'
 import { changeOf, fmt, toNumber, CURRENCIES, localToday, latestWalletEntries, displayDate, setNumberLocale } from './format'
 
-const OPTIONAL_COLS = ['entry_type', 'misc_expense']
+const OPTIONAL_COLS = ['entry_type', 'misc_expense', 'bank_amount']
 const TODAY_LABEL = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
 const DEFAULT_CFG = {
-  statOrder: ['wallet', 'today', 'merchants', 'entries', 'cashIn', 'misc'],
-  statHidden: ['cashIn', 'misc'],
+  statOrder: ['wallet', 'today', 'merchants', 'entries', 'bank', 'misc'],
+  statHidden: ['misc'],
   sectionOrder: ['charts', 'leaderboard'],
   sectionHidden: [],
 }
@@ -51,7 +52,7 @@ const STAT_LABELS = {
   today: "Today's Change",
   merchants: 'Merchants',
   entries: 'Entries shown',
-  cashIn: 'Total Cash In',
+  bank: 'Moved to Bank',
   misc: 'Total Misc Exp',
 }
 const SECTION_LABELS = {
@@ -121,6 +122,7 @@ export default function App() {
   const [records, setRecords] = useState([])
   const [walletRows, setWalletRows] = useState([])
   const [walletOpen, setWalletOpen] = useState(false)
+  const [bankOpen, setBankOpen] = useState(false)
   const [walletLoading, setWalletLoading] = useState(true)
   const [walletError, setWalletError] = useState('')
   const walletRequest = useRef(0)
@@ -161,7 +163,14 @@ export default function App() {
   }, [records, search])
   const [dashCfg, setDashCfg] = useState(() => {
     try {
-      return { ...DEFAULT_CFG, ...(JSON.parse(localStorage.getItem('dashConfig.records.v1')) || {}) }
+      const stored = JSON.parse(localStorage.getItem('dashConfig.records.v1')) || {}
+      if (Array.isArray(stored.statOrder)) {
+        stored.statOrder = stored.statOrder.map((k) => (k === 'cashIn' ? 'bank' : k))
+      }
+      if (Array.isArray(stored.statHidden)) {
+        stored.statHidden = stored.statHidden.filter((k) => k !== 'cashIn')
+      }
+      return { ...DEFAULT_CFG, ...stored }
     } catch {
       return DEFAULT_CFG
     }
@@ -447,13 +456,22 @@ export default function App() {
     const request = ++walletRequest.current
     setWalletLoading(true)
     setWalletError('')
+    const selectWith = (cols, offset) =>
+      supabase.from('daily_balances')
+        .select(cols)
+        .order('balance_date', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false })
+        .range(offset, offset + 999)
+    const FULL_COLS = 'id, merchant_name, balance_date, created_at, opening_balance, cash_in, cash_out, misc_expense, bank_amount, closing_balance'
+    const NO_BANK_COLS = 'id, merchant_name, balance_date, created_at, opening_balance, cash_in, cash_out, misc_expense, closing_balance'
+    let cols = FULL_COLS
     try {
       const rows = []
       for (let offset = 0; ; offset += 1000) {
-        const { data, error } = await supabase.from('daily_balances')
-          .select('id, merchant_name, balance_date, created_at, opening_balance, cash_in, cash_out, misc_expense, closing_balance')
-          .order('balance_date', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false })
-          .range(offset, offset + 999)
+        let { data, error } = await selectWith(cols, offset)
+        if (error && cols === FULL_COLS && (error.message || '').includes('bank_amount')) {
+          cols = NO_BANK_COLS
+          ;({ data, error } = await selectWith(cols, offset))
+        }
         if (request !== walletRequest.current) return
         if (error) throw error
         rows.push(...(data || []))
@@ -703,7 +721,7 @@ export default function App() {
   }
 
   const restoreRow = async (row) => {
-    const { id, created_at, ...rest } = row
+    const { id: _id, created_at: _created_at, ...rest } = row
     const { error } = await supabase.from('daily_balances').insert(rest)
     if (error) {
       setStatus({ type: 'error', text: `Could not restore: ${error.message}` })
@@ -790,14 +808,26 @@ export default function App() {
     const todayStr = localToday()
     const todayChange = walletRows.reduce((total, row) => total + (row.balance_date === todayStr ? changeOf(row) : 0), 0)
     const total = entries.reduce((sum, row) => sum + Math.round(toNumber(row.closing_balance) * 100), 0) / 100
-    return { total, todayChange, entries }
+    const bankByMerchant = {}
+    let bankTotal = 0
+    for (const row of walletRows) {
+      const amt = toNumber(row.bank_amount)
+      if (amt) bankByMerchant[row.merchant_name] = (bankByMerchant[row.merchant_name] || 0) + amt
+      bankTotal += amt
+    }
+    return { total, todayChange, entries, bankByMerchant, bankTotal }
   }, [walletRows])
+
+  const bankMoves = useMemo(
+    () => visibleRecords.filter((r) => toNumber(r.bank_amount) > 0),
+    [visibleRecords]
+  )
 
   const stats = useMemo(
     () => ({
       merchants: merchants.length,
       entries: visibleRecords.length,
-      cashIn: visibleRecords.reduce((t, r) => t + toNumber(r.cash_in), 0),
+      bank: visibleRecords.reduce((t, r) => t + toNumber(r.bank_amount), 0),
       misc: visibleRecords.reduce((t, r) => t + toNumber(r.misc_expense), 0),
     }),
     [visibleRecords, merchants]
@@ -843,12 +873,43 @@ export default function App() {
   })()
 
   const moneyFmt = (v) => fmt(v, currency)
+
+  const exportBankPdf = async () => {
+    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ])
+    const pdfCur = currency === '₹' ? 'Rs ' : `${currency} ` // jsPDF default fonts lack the ₹ glyph
+    const money = (v) => `${pdfCur}${toNumber(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    const doc = new jsPDF()
+    doc.setFontSize(15)
+    doc.text('Moved to Bank', 14, 15)
+    doc.setFontSize(9)
+    doc.setTextColor(110)
+    doc.text(`Generated ${new Date().toLocaleString()} · ${bankMoves.length} move${bankMoves.length === 1 ? '' : 's'} recorded`, 14, 21)
+    autoTable(doc, {
+      startY: 26,
+      head: [['Date', 'Merchant', 'To Bank', 'Notes']],
+      body: bankMoves.map((r) => [
+        r.balance_date,
+        r.merchant_name,
+        money(r.bank_amount),
+        r.notes || '',
+      ]),
+      foot: [['Total', '', money(stats.bank), '']],
+      styles: { fontSize: 8.5, cellPadding: 3 },
+      headStyles: { fillColor: [79, 70, 229] },
+      footStyles: { fillColor: [238, 242, 255], textColor: [30, 41, 59], fontStyle: 'bold' },
+      columnStyles: { 2: { halign: 'right' } },
+    })
+    doc.save(`moved-to-bank-${new Date().toISOString().slice(0, 10)}.pdf`)
+  }
   const showSkel = loading && records.length === 0
   const todayStr = localToday()
   const updatedToday = wallet.entries.filter((r) => r.balance_date === todayStr).length
   const brandLine = merchants.length
     ? `${TODAY_LABEL} · ${updatedToday} of ${merchants.length} merchant${merchants.length === 1 ? '' : 's'} updated today`
-    : 'Track opening balance, cash in/out, miscellaneous expense, and the end-of-day wallet amount per merchant.'
+    : 'Track opening balance, money moved to bank, miscellaneous expense, and the end-of-day wallet amount per merchant.'
   const statDefs = {
     wallet: { cls: 'stat-wallet', value: wallet.total, format: moneyFmt, lbl: 'Total Wallet', icon: <Wallet size={17} className="stat-icon" aria-hidden="true" /> },
     today: {
@@ -860,7 +921,7 @@ export default function App() {
     },
     merchants: { cls: 'stat-1', value: stats.merchants, format: (v) => Math.round(v), lbl: 'Merchants', icon: <Store size={17} className="stat-icon" aria-hidden="true" /> },
     entries: { cls: 'stat-2', value: stats.entries, format: (v) => Math.round(v), lbl: 'Entries shown', icon: <List size={17} className="stat-icon" aria-hidden="true" /> },
-    cashIn: { cls: 'stat-3', value: stats.cashIn, format: moneyFmt, lbl: 'Total Cash In', icon: <ArrowDownToLine size={17} className="stat-icon" aria-hidden="true" /> },
+    bank: { cls: 'stat-3', value: stats.bank, format: moneyFmt, lbl: 'Moved to Bank', icon: <Landmark size={17} className="stat-icon" aria-hidden="true" /> },
     misc: { cls: 'stat-4', value: stats.misc, format: moneyFmt, lbl: 'Total Misc Exp', icon: <Receipt size={17} className="stat-icon" aria-hidden="true" /> },
   }
 
@@ -984,13 +1045,16 @@ export default function App() {
                 ))
             : dashCfg.statOrder
                 .filter((k) => statDefs[k] && !dashCfg.statHidden.includes(k))
-                .map((k) => k === 'wallet' ? (
-                  <button key={k} type="button" className="stat stat-wallet wallet-trigger" aria-haspopup="dialog"
-                    aria-label={`Total wallet ${fmt(wallet.total, currency)}. View merchant breakdown`} onClick={() => setWalletOpen(true)}>
+                .map((k) => (k === 'wallet' || k === 'bank') ? (
+                  <button key={k} type="button" className={`stat ${statDefs[k].cls} wallet-trigger`} aria-haspopup="dialog"
+                    aria-label={k === 'wallet'
+                      ? `Total wallet ${fmt(wallet.total, currency)}. View merchant breakdown`
+                      : `Moved to bank ${fmt(stats.bank, currency)}. View details`}
+                    onClick={() => (k === 'wallet' ? setWalletOpen(true) : setBankOpen(true))}>
                     {statDefs[k].icon}
-                    <span className="num">{walletLoading ? 'Loading…' : <CountUp value={wallet.total} format={moneyFmt} />}</span>
-                    <span className="lbl">Total Wallet</span>
-                    <span className="stat-link">{walletError ? 'Refresh failed — view details' : 'View breakdown'}</span>
+                    <span className="num">{k === 'wallet' && walletLoading ? 'Loading…' : <CountUp value={statDefs[k].value} format={statDefs[k].format} />}</span>
+                    <span className="lbl">{statDefs[k].lbl}</span>
+                    <span className="stat-link">{k === 'wallet' ? (walletError ? 'Refresh failed — view details' : 'View breakdown') : 'View details'}</span>
                   </button>
                 ) : (
                   <div key={k} className={`stat ${statDefs[k].cls}`}>
@@ -1048,14 +1112,17 @@ export default function App() {
           {walletError && <div role="alert" className="message error">{walletError}</div>}
           <button type="button" className="secondary" disabled={walletLoading} onClick={loadWallet}>Refresh wallet</button>
           <ul className="wallet-list" aria-label="Merchant wallet balances">
-            {wallet.entries.map((row) => (
-              <li key={row.merchant_name}>
+            {wallet.entries.map((row, i) => (
+              <li key={row.merchant_name} style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
                 <div className="wallet-item">
                   <MerchantAvatar name={row.merchant_name} />
                   <div><strong>{row.merchant_name}</strong>
                     {row.balance_date !== todayStr && <span className="stale-badge">Not updated today</span>}
                     <span>Balance date: {displayDate(row.balance_date)}</span>
                     <span>Recorded: {displayDate(row.created_at, true)}</span>
+                    {wallet.bankByMerchant[row.merchant_name] > 0 && (
+                      <span className="bank-line">Moved to bank: {fmt(wallet.bankByMerchant[row.merchant_name], currency)}</span>
+                    )}
                   </div>
                 </div>
                 <b>{fmt(row.closing_balance, currency)}</b>
@@ -1067,7 +1134,41 @@ export default function App() {
             <p className="wallet-note">No saved closing balance (not included): {merchants.filter((m) => !wallet.entries.some((r) => r.merchant_name === m)).join(', ')}.</p>
           )}
           <p className="wallet-note">Recorded time is when the entry was created, not when it was last edited.</p>
-          <div className="wallet-total"><span>Total Wallet</span><strong>{fmt(wallet.total, currency)}</strong></div>
+          <div className="wallet-totals">
+            <div className="wallet-total-row"><span>Total Wallet</span><strong>{fmt(wallet.total, currency)}</strong></div>
+            {wallet.bankTotal > 0 && (
+              <div className="wallet-total-row"><span>Total Moved to Bank</span><strong>{fmt(wallet.bankTotal, currency)}</strong></div>
+            )}
+          </div>
+        </AccessibleDialog>
+      )}
+
+      {bankOpen && (
+        <AccessibleDialog title="Moved to Bank" className="m-sheet" onClose={() => setBankOpen(false)}>
+          <p>Every bank move recorded in the current view — merchant, date, and amount.</p>
+          <ul className="wallet-list" aria-label="Bank move records">
+            {bankMoves.map((row, i) => (
+              <li key={row.id} style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
+                <div className="wallet-item">
+                  <MerchantAvatar name={row.merchant_name} />
+                  <div><strong>{row.merchant_name}</strong>
+                    <span>Date: {displayDate(row.balance_date)}</span>
+                    {row.notes && <span>{row.notes}</span>}
+                  </div>
+                </div>
+                <b>{fmt(row.bank_amount, currency)}</b>
+              </li>
+            ))}
+          </ul>
+          {!bankMoves.length && <p>No bank moves recorded in this view. Widen the filters to see more.</p>}
+          <div className="detail-share-actions">
+            <button type="button" className="secondary" onClick={exportBankPdf} disabled={!bankMoves.length}>
+              <FileText size={15} /> Export PDF
+            </button>
+          </div>
+          <div className="wallet-totals">
+            <div className="wallet-total-row"><span>Total Moved to Bank</span><strong>{fmt(stats.bank, currency)}</strong></div>
+          </div>
         </AccessibleDialog>
       )}
 

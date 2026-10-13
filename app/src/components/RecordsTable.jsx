@@ -14,7 +14,6 @@ import {
   Pencil,
   Printer,
   RefreshCw,
-  Send,
   Share2,
   SlidersHorizontal,
   Trash2,
@@ -29,7 +28,7 @@ import MerchantAvatar from './MerchantAvatar'
 const TYPE_LABELS = { daily: 'Daily', income: 'Income', expense: 'Expense', transfer: 'Transfer' }
 const PAGE_SIZE = 50
 const DEFAULT_HIDDEN = ['type', 'cashIn', 'cashOut', 'misc', 'running', 'notes']
-const MONEY_COLS = ['opening', 'cashIn', 'cashOut', 'misc', 'closing', 'change', 'running']
+const MONEY_COLS = ['opening', 'cashIn', 'cashOut', 'bank', 'misc', 'closing', 'change', 'running']
 const iso = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const rangePresets = () => {
@@ -57,6 +56,7 @@ const SORTERS = {
   opening: (r) => toNumber(r.opening_balance),
   cashIn: (r) => toNumber(r.cash_in),
   cashOut: (r) => toNumber(r.cash_out),
+  bank: (r) => toNumber(r.bank_amount),
   misc: (r) => toNumber(r.misc_expense),
   closing: (r) => toNumber(r.closing_balance),
   change: (r) => changeOf(r),
@@ -200,10 +200,11 @@ export default function RecordsTable({
         (t, r) => ({
           cashIn: t.cashIn + toNumber(r.cash_in),
           cashOut: t.cashOut + toNumber(r.cash_out),
+          bank: t.bank + toNumber(r.bank_amount),
           misc: t.misc + toNumber(r.misc_expense),
           change: t.change + changeOf(r),
         }),
-        { cashIn: 0, cashOut: 0, misc: 0, change: 0 }
+        { cashIn: 0, cashOut: 0, bank: 0, misc: 0, change: 0 }
       ),
     [records]
   )
@@ -289,13 +290,14 @@ export default function RecordsTable({
       },
       { id: 'cashIn', label: 'Cash In', sort: 'cashIn', hideable: true, cell: (r) => fmt(r.cash_in, currency) },
       { id: 'cashOut', label: 'Cash Out', sort: 'cashOut', hideable: true, cell: (r) => (toNumber(r.cash_out) ? <span className="neg">−{fmt(Math.abs(toNumber(r.cash_out)), currency)}</span> : fmt(0, currency)) },
+      { id: 'bank', label: 'To Bank', sort: 'bank', hideable: true, cell: (r) => fmt(r.bank_amount, currency) },
       { id: 'misc', label: 'Misc Exp', sort: 'misc', hideable: true, cell: (r) => fmt(r.misc_expense, currency) },
       { id: 'closing', label: 'Closing', sort: 'closing', hideable: true, cell: (r) => fmt(r.closing_balance, currency) },
       {
         id: 'change',
         label: 'Change',
         sort: 'change',
-        tip: 'End of day − Opening + Cash Out + Misc',
+        tip: 'End of day − Opening + Cash Out + To Bank + Misc',
         cell: (r) => {
           const c = changeOf(r)
           return (
@@ -329,7 +331,7 @@ export default function RecordsTable({
   const COLS = visCols.length
 
   const exportCsv = () => {
-    const header = ['Date', 'Merchant', 'Type', 'Opening', 'Cash In', 'Cash Out', 'Misc Exp', 'Closing', 'Change', 'Notes']
+    const header = ['Date', 'Merchant', 'Type', 'Opening', 'Cash In', 'Cash Out', 'To Bank', 'Misc Exp', 'Closing', 'Change', 'Notes']
     const lines = [header.map((h) => `"${h}"`).join(',')]
     for (const r of sorted) {
       lines.push(
@@ -340,6 +342,7 @@ export default function RecordsTable({
           toNumber(r.opening_balance).toFixed(2),
           toNumber(r.cash_in).toFixed(2),
           toNumber(r.cash_out).toFixed(2),
+          toNumber(r.bank_amount).toFixed(2),
           toNumber(r.misc_expense).toFixed(2),
           toNumber(r.closing_balance).toFixed(2),
           changeOf(r).toFixed(2),
@@ -380,31 +383,31 @@ export default function RecordsTable({
 
     const mTotals = mRows.reduce(
       (acc, r) => ({
-        cashIn: acc.cashIn + toNumber(r.cash_in),
         cashOut: acc.cashOut + toNumber(r.cash_out),
+        bank: acc.bank + toNumber(r.bank_amount),
         misc: acc.misc + toNumber(r.misc_expense),
         change: acc.change + changeOf(r),
       }),
-      { cashIn: 0, cashOut: 0, misc: 0, change: 0 }
+      { cashOut: 0, bank: 0, misc: 0, change: 0 }
     )
 
     autoTable(doc, {
       startY: 26,
-      head: [['Date', 'Type', 'Opening', 'Cash In', 'Cash Out', 'Misc', 'Closing', 'Net Change']],
+      head: [['Date', 'Type', 'Opening', 'Cash Out', 'To Bank', 'Misc', 'Closing', 'Net Change']],
       body: mRows.map((r) => [
         r.balance_date,
         TYPE_LABELS[r.entry_type] || r.entry_type || 'Daily',
         money(r.opening_balance),
-        money(r.cash_in),
         money(r.cash_out),
+        money(r.bank_amount),
         money(r.misc_expense),
         money(r.closing_balance),
         money(changeOf(r)),
       ]),
       foot: [[
         'Total', '', '',
-        money(mTotals.cashIn),
         money(mTotals.cashOut),
+        money(mTotals.bank),
         money(mTotals.misc),
         '',
         money(mTotals.change),
@@ -432,12 +435,12 @@ export default function RecordsTable({
     const latest = mRows[0]
     const mTotals = mRows.reduce(
       (acc, r) => ({
-        cashIn: acc.cashIn + toNumber(r.cash_in),
         cashOut: acc.cashOut + toNumber(r.cash_out),
+        bank: acc.bank + toNumber(r.bank_amount),
         misc: acc.misc + toNumber(r.misc_expense),
         change: acc.change + changeOf(r),
       }),
-      { cashIn: 0, cashOut: 0, misc: 0, change: 0 }
+      { cashOut: 0, bank: 0, misc: 0, change: 0 }
     )
 
     const text = [
@@ -446,7 +449,7 @@ export default function RecordsTable({
       `Latest Date: ${latest.balance_date}`,
       `Closing Balance: ${fmt(latest.closing_balance, currency)}`,
       `Total Net Change: ${mTotals.change >= 0 ? '+' : '−'}${fmt(Math.abs(mTotals.change), currency)}`,
-      `Total Cash In: ${fmt(mTotals.cashIn, currency)}`,
+      `Total Moved to Bank: ${fmt(mTotals.bank, currency)}`,
       `Total Cash Out: ${fmt(mTotals.cashOut, currency)}`,
       `Entries Count: ${mRows.length}`,
     ].join('\n')
@@ -473,14 +476,14 @@ export default function RecordsTable({
     )
     autoTable(doc, {
       startY: 25,
-      head: [['Date', 'Merchant', 'Type', 'Opening', 'Cash In', 'Cash Out', 'Misc', 'Closing', 'Change', 'Notes']],
+      head: [['Date', 'Merchant', 'Type', 'Opening', 'Cash Out', 'To Bank', 'Misc', 'Closing', 'Change', 'Notes']],
       body: sorted.map((r) => [
         r.balance_date,
         r.merchant_name,
         TYPE_LABELS[r.entry_type] || r.entry_type || 'Daily',
         money(r.opening_balance),
-        money(r.cash_in),
         money(r.cash_out),
+        money(r.bank_amount),
         money(r.misc_expense),
         money(r.closing_balance),
         money(changeOf(r)),
@@ -488,7 +491,7 @@ export default function RecordsTable({
       ]),
       foot: [[
         'Total', '', '', '',
-        money(totals.cashIn), money(totals.cashOut), money(totals.misc), '', money(totals.change), '',
+        money(totals.cashOut), money(totals.bank), money(totals.misc), '', money(totals.change), '',
       ]],
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [79, 70, 229] },
@@ -711,6 +714,7 @@ export default function RecordsTable({
                       if (c.id === 'date') return <td key={c.id}>Totals ({records.length} rows)</td>
                       if (c.id === 'cashIn') return <td key={c.id} className="money-cell">{fmt(totals.cashIn, currency)}</td>
                       if (c.id === 'cashOut') return <td key={c.id} className={`money-cell ${totals.cashOut ? 'neg' : ''}`}>{totals.cashOut ? `−${fmt(Math.abs(totals.cashOut), currency)}` : fmt(0, currency)}</td>
+                      if (c.id === 'bank') return <td key={c.id} className="money-cell">{fmt(totals.bank, currency)}</td>
                       if (c.id === 'misc') return <td key={c.id} className="money-cell">{fmt(totals.misc, currency)}</td>
                       if (c.id === 'change')
                         return (
@@ -820,7 +824,14 @@ export default function RecordsTable({
         <p><span className="merchant-cell"><MerchantAvatar name={detailRow.merchant_name} /><strong>{detailRow.merchant_name}</strong></span> · {displayDate(detailRow.balance_date)}</p>
         <dl className="record-detail-list">
           <div><dt>Entry type</dt><dd>{TYPE_LABELS[detailRow.entry_type] || 'Daily'}</dd></div>
-          {[['Opening', 'opening_balance'], ['Cash In', 'cash_in'], ['Cash Out', 'cash_out'], ['Misc Expense', 'misc_expense'], ['Closing', 'closing_balance']].map(([label, key]) => (
+          {[
+            ['Opening', 'opening_balance'],
+            ...(toNumber(detailRow.cash_in) ? [['Cash In', 'cash_in']] : []),
+            ...(toNumber(detailRow.cash_out) ? [['Cash Out', 'cash_out']] : []),
+            ['To Bank', 'bank_amount'],
+            ['Misc Expense', 'misc_expense'],
+            ['Closing', 'closing_balance'],
+          ].map(([label, key]) => (
             <div key={key}><dt>{label}</dt><dd className={key === 'cash_out' && toNumber(detailRow[key]) ? 'neg' : ''}>{key === 'cash_out' && toNumber(detailRow[key]) ? `−${fmt(Math.abs(toNumber(detailRow[key])), currency)}` : fmt(detailRow[key], currency)}</dd></div>
           ))}
           <div><dt>Change</dt><dd className={changeOf(detailRow) >= 0 ? 'pos' : 'neg'}>{changeOf(detailRow) >= 0 ? '+' : '−'}{fmt(Math.abs(changeOf(detailRow)), currency)}</dd></div>

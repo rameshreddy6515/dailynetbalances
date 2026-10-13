@@ -563,10 +563,15 @@ label .muted {
   font-weight: 500;
   margin-top: 6px;
 }
-.calc .misc-move {
+.calc .calc-moves {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-left: 12px;
-  font-weight: 600;
   vertical-align: middle;
+}
+.calc .misc-move {
+  font-weight: 600;
 }
 .summary-grid {
   display: grid;
@@ -2263,7 +2268,7 @@ tfoot td {
 .icon-button { flex: 0 0 44px; padding: 8px; }
 .entry-panel .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .entry-panel form > .grid:first-child > label:first-child { grid-column: 1 / -1; }
-.entry-panel .grid-tight > label:last-child { grid-column: 1 / -1; }
+
 .entry-panel .entry-form-actions {
   position: sticky;
   bottom: -24px;
@@ -2362,25 +2367,30 @@ tfoot td {
 .wallet-trigger > span { display: block; }
 .stat-link { margin-top: 10px; color: var(--focus); font-size: 13px; text-decoration: underline; }
 .wallet-list { list-style: none; padding: 0; margin: 16px 0; }
-.wallet-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.wallet-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); animation: row-in 0.25s ease both; }
 .wallet-list li > div { min-width: 0; }
 .wallet-list strong { overflow-wrap: anywhere; }
 .wallet-list span { display: block; color: var(--muted); margin-top: 4px; font-size: 13px; }
 .wallet-list b { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.wallet-total {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
+.wallet-totals {
   font-size: 18px;
   position: sticky;
   bottom: -24px;
   margin: 8px -24px -24px;
-  padding: 14px 24px;
+  padding: 0 24px;
   background: var(--card);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-top: 1px solid var(--border);
 }
+.wallet-total-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+}
+.wallet-total-row + .wallet-total-row { border-top: 1px solid var(--border); padding: 10px 0; }
+.wallet-list .bank-line { color: var(--focus); font-weight: 600; }
 .wallet-note { font-size: 13px; overflow-wrap: anywhere; margin-bottom: 0; }
 .active-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .filter-chip { background: var(--calc-bg); color: var(--text); border: 1px solid var(--input-border); padding: 8px 12px; border-radius: 24px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
@@ -2420,9 +2430,9 @@ tfoot td {
 @media (max-width: 640px) {
   .accessible-dialog { padding: 20px; }
   .accessible-dialog .modal-head { top: -20px; margin: -20px -20px 16px; padding: 20px 20px 12px; }
-  .wallet-total { bottom: -20px; margin: 8px -20px -20px; padding: 14px 20px; }
+  .wallet-totals { bottom: -20px; margin: 8px -20px -20px; padding: 0 20px; }
   .wallet-list li { flex-wrap: wrap; }
-  .wallet-total { font-size: 16px; }
+  .wallet-totals { font-size: 16px; }
 }
 
 

@@ -5,7 +5,7 @@ export const toNumber = (v) => {
 
 export const changeOf = (r) =>
   toNumber(r.closing_balance) - toNumber(r.opening_balance)
-  + toNumber(r.cash_out) + toNumber(r.misc_expense)
+  + toNumber(r.cash_out) + toNumber(r.misc_expense) + toNumber(r.bank_amount)
 
 let numberLocale = 'en-IN'
 export const setNumberLocale = (loc) => {

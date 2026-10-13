@@ -39,8 +39,7 @@ export default function SummaryPanel({ records, currency }) {
         byMerchant[m] = {
           name: m,
           count: 0,
-          cashIn: 0,
-          cashOut: 0,
+          bank: 0,
           misc: 0,
           change: 0,
           lastBalance: 0,
@@ -49,8 +48,7 @@ export default function SummaryPanel({ records, currency }) {
       }
       const s = byMerchant[m]
       s.count += 1
-      s.cashIn += toNumber(r.cash_in)
-      s.cashOut += toNumber(r.cash_out)
+      s.bank += toNumber(r.bank_amount)
       s.misc += toNumber(r.misc_expense)
       s.change += changeOf(r)
       const key = `${r.balance_date}|${r.created_at || ''}`
@@ -107,8 +105,8 @@ export default function SummaryPanel({ records, currency }) {
               <b>{s.count}</b>
             </div>
             <div className="row">
-              <span>Total Cash In</span>
-              <b>{money(s.cashIn, currency)}</b>
+              <span>Moved to Bank</span>
+              <b>{money(s.bank, currency)}</b>
             </div>
             <div className="row">
               <span>Total Misc Exp</span>

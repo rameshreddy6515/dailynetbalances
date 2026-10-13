@@ -25,6 +25,9 @@ alter table public.daily_balances
 alter table public.daily_balances
   add column if not exists entry_type text not null default 'daily';
 
+alter table public.daily_balances
+  add column if not exists bank_amount numeric(12,2) not null default 0;
+
 alter table public.merchants
   add column if not exists initial_balance numeric(12,2) not null default 0;
 

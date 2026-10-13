@@ -16,8 +16,7 @@ const blank = {
   merchant: '',
   date: today,
   opening: '',
-  cashIn: '',
-  cashOut: '',
+  bank: '',
   misc: '',
   closing: '',
   entryType: 'daily',
@@ -68,8 +67,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
         merchant: editingRow.merchant_name || '',
         date: editingRow.balance_date || today,
         opening: String(editingRow.opening_balance ?? 0),
-        cashIn: String(editingRow.cash_in ?? 0),
-        cashOut: String(editingRow.cash_out ?? 0),
+        bank: String(editingRow.bank_amount ?? 0),
         misc: String(editingRow.misc_expense ?? 0),
         closing: String(editingRow.closing_balance ?? 0),
         entryType: editingRow.entry_type || 'daily',
@@ -95,8 +93,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
       merchant: copySource.merchant_name || '',
       date: copySource.balance_date || today,
       opening: String(copySource.opening_balance ?? 0),
-      cashIn: String(copySource.cash_in ?? 0),
-      cashOut: String(copySource.cash_out ?? 0),
+      bank: String(copySource.bank_amount ?? 0),
       misc: String(copySource.misc_expense ?? 0),
       closing: String(copySource.closing_balance ?? 0),
       entryType: copySource.entry_type || 'daily',
@@ -155,13 +152,14 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
   const opening = toNumber(form.opening)
-  const cashIn = toNumber(form.cashIn)
-  const cashOut = toNumber(form.cashOut)
+  const bank = toNumber(form.bank)
   const misc = toNumber(form.misc)
   const closing = toNumber(form.closing)
+  const legacyCashIn = toNumber(editingRow?.cash_in)
+  const legacyCashOut = toNumber(editingRow?.cash_out)
   const walletChange = closing - opening
-  const expectedClosing = opening + cashIn - cashOut - misc
-  const todayChange = walletChange + cashOut + misc
+  const expectedClosing = opening + legacyCashIn - legacyCashOut - bank - misc
+  const todayChange = walletChange + legacyCashOut + bank + misc
 
   const resetForm = (keepMerchant = true) => {
     closingTouched.current = false
@@ -177,8 +175,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
       merchant_name: form.merchant.trim(),
       balance_date: form.date,
       opening_balance: opening,
-      cash_in: cashIn,
-      cash_out: cashOut,
+      bank_amount: bank,
       misc_expense: misc,
       entry_type: form.entryType,
       closing_balance: closing,
@@ -291,30 +288,24 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
           )}
         </label>
 
-        <label data-tip="Money received today">
-          Cash In
+        <label data-tip="Money moved to bank today">
+          Move to Bank
           <NumInput
-            value={form.cashIn}
+            value={form.bank}
             onChange={(v) => {
               setForm((f) => {
-                const prevCashIn = toNumber(f.cashIn)
-                const nextCashIn = toNumber(v)
-                const delta = nextCashIn - prevCashIn
-                const currentClosing = toNumber(f.closing)
-                const nextClosing = (currentClosing + delta >= 0 ? currentClosing + delta : 0).toFixed(2)
+                const delta = toNumber(v) - toNumber(f.bank)
+                const nextClosing = Math.max(0, toNumber(f.closing) - delta)
                 return {
                   ...f,
-                  cashIn: v,
-                  closing: !f.closing && f.opening ? (toNumber(f.opening) + nextCashIn).toFixed(2) : nextClosing,
+                  bank: v,
+                  closing: !f.closing && f.opening
+                    ? Math.max(0, toNumber(f.opening) - toNumber(v)).toFixed(2)
+                    : nextClosing.toFixed(2),
                 }
               })
             }}
           />
-        </label>
-
-        <label data-tip="Money taken out today">
-          Cash Out
-          <NumInput value={form.cashOut} onChange={(v) => setForm((f) => ({ ...f, cashOut: v }))} />
         </label>
 
         <label>
@@ -341,16 +332,28 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
           {todayChange >= 0 ? '+' : '−'}{fmt(Math.abs(todayChange), currency)}
         </b>
         {form.closing !== '' && todayChange < -0.004 && (
-          <button
-            type="button"
-            className="small secondary misc-move"
-            data-tip="Record the missing amount as a miscellaneous expense"
-            onClick={() =>
-              setForm((f) => ({ ...f, misc: (toNumber(f.misc) + Math.abs(todayChange)).toFixed(2) }))
-            }
-          >
-            Move {fmt(Math.abs(todayChange), currency)} to Misc
-          </button>
+          <span className="calc-moves">
+            <button
+              type="button"
+              className="small secondary misc-move"
+              data-tip="Record the missing amount as moved to bank"
+              onClick={() =>
+                setForm((f) => ({ ...f, bank: (toNumber(f.bank) + Math.abs(todayChange)).toFixed(2) }))
+              }
+            >
+              Move {fmt(Math.abs(todayChange), currency)} to Bank
+            </button>
+            <button
+              type="button"
+              className="small secondary misc-move"
+              data-tip="Record the missing amount as a miscellaneous expense"
+              onClick={() =>
+                setForm((f) => ({ ...f, misc: (toNumber(f.misc) + Math.abs(todayChange)).toFixed(2) }))
+              }
+            >
+              Move {fmt(Math.abs(todayChange), currency)} to Misc
+            </button>
+          </span>
         )}
         <div className="muted">
           Expected closing {fmt(expectedClosing, currency)} · Wallet change (End of day − Opening):{' '}
@@ -394,9 +397,10 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
       </div>
 
       <div className="hint">
-        Formula: <code>today change = end of day amount - opening balance + misc expense</code>. The misc
-        expense is added back because it already reduced your wallet balance. Cash In and Cash Out are
-        recorded for reference.
+        Formula: <code>today change = end of day amount - opening balance + move to bank + misc expense</code>.
+        Entering a Move to Bank amount lowers the end of day amount automatically, so the wallet drops and
+        the next opening starts lower — money moved to bank and misc expense are added back because they
+        only moved money, they are not profit or loss.
       </div>
     </form>
   )
