@@ -6,29 +6,28 @@ import Select from './Select'
 import DatePicker from './DatePicker'
 import MerchantAvatar from './MerchantAvatar'
 
-const today = localToday()
 const DRAFT_KEY = 'balanceDraft'
 const toNumber = (v) => {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
 }
-const blank = {
+const blank = () => ({
   merchant: '',
-  date: today,
+  date: localToday(),
   opening: '',
   bank: '',
   misc: '',
   closing: '',
   entryType: 'daily',
   notes: '',
-}
+})
 
 const loadDraft = () => {
   try {
     const draft = JSON.parse(localStorage.getItem(DRAFT_KEY))
-    return draft ? { ...blank, ...draft } : blank
+    return draft ? { ...blank(), ...draft } : blank()
   } catch {
-    return blank
+    return blank()
   }
 }
 
@@ -65,7 +64,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
     if (editingRow) {
       setForm({
         merchant: editingRow.merchant_name || '',
-        date: editingRow.balance_date || today,
+        date: editingRow.balance_date || localToday(),
         opening: String(editingRow.opening_balance ?? 0),
         bank: String(editingRow.bank_amount ?? 0),
         misc: String(editingRow.misc_expense ?? 0),
@@ -75,7 +74,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
       })
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     } else if (previousEditing.current) {
-      setForm((f) => ({ ...blank, merchant: f.merchant, date: f.date }))
+      setForm((f) => ({ ...blank(), merchant: f.merchant }))
     }
     previousEditing.current = editingRow
   }, [editingRow])
@@ -91,7 +90,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
     closingTouched.current = true
     setForm({
       merchant: copySource.merchant_name || '',
-      date: copySource.balance_date || today,
+      date: copySource.balance_date || localToday(),
       opening: String(copySource.opening_balance ?? 0),
       bank: String(copySource.bank_amount ?? 0),
       misc: String(copySource.misc_expense ?? 0),
@@ -163,7 +162,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
 
   const resetForm = (keepMerchant = true) => {
     closingTouched.current = false
-    setForm((f) => (keepMerchant ? { ...blank, merchant: f.merchant, date: f.date } : blank))
+    setForm((f) => (keepMerchant ? { ...blank(), merchant: f.merchant } : blank()))
     localStorage.removeItem(DRAFT_KEY)
   }
 
@@ -215,7 +214,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
       if (ok) {
         if (addAnother) {
           closingTouched.current = false
-          setForm((f) => ({ ...blank, date: f.date }))
+          setForm(blank())
           localStorage.removeItem(DRAFT_KEY)
           formRef.current?.querySelector('.select-btn')?.focus()
         } else {
