@@ -13,9 +13,12 @@ import Select from './components/Select'
 import Switch from './components/Switch'
 import CountUp from './components/CountUp'
 import MerchantAvatar from './components/MerchantAvatar'
+import CalcPad from './components/CalcPad'
+import ChargeCalc from './components/ChargeCalc'
 import { registerSW } from './pwa'
 import {
   AlertTriangle,
+  Calculator,
   CheckCircle2,
   ChevronDown,
   FileText,
@@ -122,6 +125,9 @@ export default function App() {
   const [records, setRecords] = useState([])
   const [walletRows, setWalletRows] = useState([])
   const [walletOpen, setWalletOpen] = useState(false)
+  const [pendingOpen, setPendingOpen] = useState(false)
+  const [calcOpen, setCalcOpen] = useState(false)
+  const [chargeOpen, setChargeOpen] = useState(false)
   const [bankOpen, setBankOpen] = useState(false)
   const [walletLoading, setWalletLoading] = useState(true)
   const [walletError, setWalletError] = useState('')
@@ -803,6 +809,28 @@ export default function App() {
     setEntryOpen(true)
   }
 
+  const chainBreaks = useMemo(() => {
+    const byMerchant = {}
+    for (const r of walletRows) (byMerchant[r.merchant_name] ||= []).push(r)
+    const breaks = new Map()
+    for (const rows of Object.values(byMerchant)) {
+      rows.sort(
+        (a, b) =>
+          (a.balance_date || '').localeCompare(b.balance_date || '') ||
+          (a.created_at || '').localeCompare(b.created_at || '') ||
+          String(a.id).localeCompare(String(b.id))
+      )
+      let last
+      for (const r of rows) {
+        if (last !== undefined && Math.abs(last - toNumber(r.opening_balance)) > 0.01) {
+          breaks.set(r.id, last)
+        }
+        last = toNumber(r.closing_balance)
+      }
+    }
+    return breaks
+  }, [walletRows])
+
   const wallet = useMemo(() => {
     const entries = latestWalletEntries(walletRows)
     const todayStr = localToday()
@@ -862,6 +890,8 @@ export default function App() {
       { group: 'Go to', label: 'New entry', run: () => newEntry() },
       { group: 'Go to', label: 'Analytics', run: () => { setAnalyticsOpen(true); go('analytics')() } },
       { group: 'Go to', label: 'Saved balances table', run: go('records') },
+      { group: 'Go to', label: 'Calculator', run: () => setCalcOpen(true) },
+      { group: 'Go to', label: 'Charge calculator', run: () => setChargeOpen(true) },
       { group: 'Action', label: 'Refresh records', run: () => loadRecords(filters) },
       { group: 'Action', label: 'Customize dashboard', run: () => setDashOpen(true) },
       { group: 'Action', label: 'Toggle dark mode', run: () => setTheme(dark ? 'light' : 'dark') },
@@ -907,6 +937,7 @@ export default function App() {
   const showSkel = loading && records.length === 0
   const todayStr = localToday()
   const updatedToday = wallet.entries.filter((r) => r.balance_date === todayStr).length
+  const pendingToday = merchants.filter((m) => !wallet.entries.some((r) => r.merchant_name === m && r.balance_date === todayStr))
   const brandLine = merchants.length
     ? `${TODAY_LABEL} · ${updatedToday} of ${merchants.length} merchant${merchants.length === 1 ? '' : 's'} updated today`
     : 'Track opening balance, money moved to bank, miscellaneous expense, and the end-of-day wallet amount per merchant.'
@@ -960,6 +991,7 @@ export default function App() {
           onCopy={copyRecord}
           onBackup={backupData}
           onRestoreFile={restoreData}
+          chainBreaks={chainBreaks}
           restoring={restoring}
           flashId={flashId}
         />
@@ -995,7 +1027,13 @@ export default function App() {
                 <span className="brand-accent" aria-hidden="true" />
               </div>
             </div>
-            <p className="brand-sub">{brandLine}</p>
+            {merchants.length ? (
+              <button type="button" className="brand-sub brand-sub-btn" aria-haspopup="dialog" onClick={() => setPendingOpen(true)}>
+                {brandLine}
+              </button>
+            ) : (
+              <p className="brand-sub">{brandLine}</p>
+            )}
           </div>
           <div className="header-controls">
           <div className="actions header-primary">
@@ -1010,6 +1048,16 @@ export default function App() {
                 </div>
               </details>
             )}
+            <button
+              type="button"
+              className="secondary small icon-button"
+              onClick={() => setChargeOpen(true)}
+              data-tip="Merchant charge calculator"
+              aria-haspopup="dialog"
+              aria-label="Merchant charge calculator"
+            >
+              <Calculator size={16} />
+            </button>
             <button
               type="button"
               className="secondary small icon-button"
@@ -1143,6 +1191,62 @@ export default function App() {
         </AccessibleDialog>
       )}
 
+      {pendingOpen && (
+        <AccessibleDialog title="Pending updates" onClose={() => setPendingOpen(false)}>
+          {pendingToday.length ? (
+            <>
+              <p>{pendingToday.length} merchant{pendingToday.length === 1 ? ' has' : 's have'} no entry for {displayDate(todayStr)}.</p>
+              <ul className="wallet-list" aria-label="Merchants pending today's entry">
+                {pendingToday.map((m, i) => {
+                  const last = wallet.entries.find((r) => r.merchant_name === m)
+                  return (
+                    <li key={m} style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
+                      <div className="wallet-item">
+                        <MerchantAvatar name={m} />
+                        <div><strong>{m}</strong>
+                          <span>{last ? `Last closing: ${fmt(last.closing_balance, currency)} · ${displayDate(last.balance_date)}` : 'No records yet'}</span>
+                        </div>
+                      </div>
+                      <button type="button" className="small primary" onClick={() => { setPendingOpen(false); newEntry(m) }}>
+                        <Plus size={14} /> Add entry
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
+          ) : (
+            <p>All merchants have an entry for today.</p>
+          )}
+        </AccessibleDialog>
+      )}
+
+      {calcOpen && (
+        <AccessibleDialog title="Calculator" className="calc-dialog" persistent onClose={() => setCalcOpen(false)}>
+          <CalcPad />
+          <div className="calc-swap">
+            <button type="button" className="secondary small" onClick={() => { setCalcOpen(false); setChargeOpen(true) }}>
+              Merchant charge calculator
+            </button>
+          </div>
+        </AccessibleDialog>
+      )}
+
+      {chargeOpen && (
+        <AccessibleDialog title="Charge calculator" className="calc-dialog" persistent onClose={() => setChargeOpen(false)}>
+          <details className="hint">
+            <summary>How is this calculated?</summary>
+            <p>Merchant charges = Amount × charge rate. Final CC amount = Amount − charge rate amount. Retailer misc charges = charge rate amount − merchant type amount.</p>
+          </details>
+          <ChargeCalc currency={currency} />
+          <div className="calc-swap">
+            <button type="button" className="secondary small" onClick={() => { setChargeOpen(false); setCalcOpen(true) }}>
+              Standard calculator
+            </button>
+          </div>
+        </AccessibleDialog>
+      )}
+
       {bankOpen && (
         <AccessibleDialog title="Moved to Bank" className="m-sheet" onClose={() => setBankOpen(false)}>
           <p>Every bank move recorded in the current view — merchant, date, and amount.</p>
@@ -1215,6 +1319,10 @@ export default function App() {
         <button type="button" onClick={() => setShowMerchants(true)} aria-label="Merchants">
           <Store size={19} />
           <span>Merchants</span>
+        </button>
+        <button type="button" onClick={() => setCalcOpen(true)} aria-label="Calculator">
+          <Calculator size={19} />
+          <span>Calc</span>
         </button>
       </nav>
 

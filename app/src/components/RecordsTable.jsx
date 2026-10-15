@@ -75,6 +75,7 @@ export default function RecordsTable({
   onCopy,
   onBackup,
   onRestoreFile,
+  chainBreaks = new Map(),
   restoring = false,
   search = '',
   onSearchChange,
@@ -172,27 +173,6 @@ export default function RecordsTable({
   }, [records, sort])
 
   // Map of chronological records to identify opening adjustments (audit trail)
-  const adjustedIds = useMemo(() => {
-    const sortedChronological = [...records].sort((a, b) => {
-      const dComp = (a.balance_date || '').localeCompare(b.balance_date || '')
-      if (dComp !== 0) return dComp
-      return (a.created_at || '').localeCompare(b.created_at || '')
-    })
-    const lastClosingByMerchant = {}
-    const adjusted = new Set()
-    for (const r of sortedChronological) {
-      const m = r.merchant_name || ''
-      if (lastClosingByMerchant[m] !== undefined) {
-        const expected = lastClosingByMerchant[m]
-        const actual = toNumber(r.opening_balance)
-        if (Math.abs(expected - actual) > 0.01) {
-          adjusted.add(r.id)
-        }
-      }
-      lastClosingByMerchant[m] = toNumber(r.closing_balance)
-    }
-    return adjusted
-  }, [records])
 
   const totals = useMemo(
     () =>
@@ -280,8 +260,8 @@ export default function RecordsTable({
         cell: (r) => (
           <span className="opening-cell">
             {fmt(r.opening_balance, currency)}
-            {adjustedIds.has(r.id) && (
-              <span className="adj-badge" data-tip="Opening differs from previous closing balance">
+            {chainBreaks.has(r.id) && (
+              <span className="adj-badge" data-tip={`Opening differs from previous closing (${fmt(chainBreaks.get(r.id), currency)})`}>
                 Adj
               </span>
             )}
@@ -770,7 +750,7 @@ export default function RecordsTable({
                           <span className="muted">{row.balance_date}</span>
                           <span>
                             Open <b>{fmt(row.opening_balance, currency)}</b>
-                            {adjustedIds.has(row.id) && <span className="adj-badge" data-tip="Opening differs from previous closing">Adj</span>}
+                            {chainBreaks.has(row.id) && <span className="adj-badge" data-tip={`Opening differs from previous closing (${fmt(chainBreaks.get(row.id), currency)})`}>Adj</span>}
                           </span>
                           <span>
                             Close <b>{fmt(row.closing_balance, currency)}</b>

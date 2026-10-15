@@ -25,7 +25,7 @@ const blank = () => ({
 const loadDraft = () => {
   try {
     const draft = JSON.parse(localStorage.getItem(DRAFT_KEY))
-    return draft ? { ...blank(), ...draft } : blank()
+    return draft ? { ...blank(), ...draft, date: localToday(), merchant: '' } : blank()
   } catch {
     return blank()
   }
@@ -46,6 +46,7 @@ const NumInput = ({ value, onChange, required }) => (
 export default function BalanceForm({ merchants, initialBalances, editingRow, selectMerchant, copySource, currency, onSubmit, onConfirm, onCancelEdit, onClose, onBusyChange }) {
   const [form, setForm] = useState(loadDraft)
   const [openingSource, setOpeningSource] = useState(null)
+  const [closingAuto, setClosingAuto] = useState(false)
   const [prefillTick, setPrefillTick] = useState(0)
   const [saving, setSaving] = useState(false)
   const [flash, setFlash] = useState(false)
@@ -60,6 +61,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
 
   useEffect(() => {
     setOpeningSource(null)
+    setClosingAuto(false)
     closingTouched.current = false
     if (editingRow) {
       setForm({
@@ -82,6 +84,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
   useEffect(() => {
     if (!selectMerchant) return
     setOpeningSource(null)
+    setClosingAuto(false)
     setForm((f) => {
       if (f.merchant === selectMerchant) return f
       closingTouched.current = false
@@ -92,6 +95,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
   useEffect(() => {
     if (!copySource) return
     setOpeningSource(null)
+    setClosingAuto(false)
     closingTouched.current = true
     setForm({
       merchant: copySource.merchant_name || '',
@@ -133,6 +137,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
             closing: toNumber(f.closing) === 0 ? prevClose : f.closing,
           }))
           setOpeningSource(prev.balance_date)
+          setClosingAuto(!closingTouched.current)
         } else {
           const init = Number(initialBalances?.[form.merchant]) || 0
           if (init > 0) {
@@ -143,8 +148,10 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
               closing: toNumber(f.closing) === 0 ? initVal : f.closing,
             }))
             setOpeningSource('__init__')
+            setClosingAuto(!closingTouched.current)
           } else {
             setOpeningSource(null)
+            setClosingAuto(false)
           }
         }
       })
@@ -167,6 +174,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
 
   const resetForm = (keepMerchant = true) => {
     closingTouched.current = false
+    setClosingAuto(false)
     setForm((f) => (keepMerchant ? { ...blank(), merchant: f.merchant } : blank()))
     localStorage.removeItem(DRAFT_KEY)
   }
@@ -252,6 +260,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
               if (v === form.merchant) return
               closingTouched.current = false
               setOpeningSource(null)
+              setClosingAuto(false)
               setForm((f) => ({ ...f, merchant: v, opening: '', closing: '', bank: '', misc: '' }))
             }}
             placeholder="Select a merchant"
@@ -328,10 +337,12 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
             value={form.closing}
             onChange={(v) => {
               closingTouched.current = true
+              setClosingAuto(false)
               setForm((f) => ({ ...f, closing: v }))
             }}
             required
           />
+          {closingAuto && <span className="muted">Prefilled — enter actual closing</span>}
         </label>
       </div>
 
@@ -405,12 +416,15 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
         </button>
       </div>
 
-      <div className="hint">
-        Formula: <code>today change = end of day amount - opening balance + move to bank + misc expense</code>.
-        Entering a Move to Bank amount lowers the end of day amount automatically, so the wallet drops and
-        the next opening starts lower — money moved to bank and misc expense are added back because they
-        only moved money, they are not profit or loss.
-      </div>
+      <details className="hint">
+        <summary>How is net change calculated?</summary>
+        <p>
+          <code>today change = end of day amount − opening balance + move to bank + misc expense</code>.
+          Entering a Move to Bank amount lowers the end of day amount automatically, so the wallet drops and
+          the next opening starts lower — money moved to bank and misc expense are added back because they
+          only moved money, they are not profit or loss.
+        </p>
+      </details>
     </form>
   )
 }

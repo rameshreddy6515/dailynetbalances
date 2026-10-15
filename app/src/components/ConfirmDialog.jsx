@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
-import { X } from 'lucide-react'
+import { AlertTriangle, Info, X } from 'lucide-react'
 
-export function AccessibleDialog({ title, children, onClose, className = '' }) {
+export function AccessibleDialog({ title, children, onClose, className = '', persistent = false }) {
   const ref = useRef(null)
   const titleId = useId()
 
@@ -20,7 +20,7 @@ export function AccessibleDialog({ title, children, onClose, className = '' }) {
 
   return (
     <dialog ref={ref} className={`accessible-dialog no-print ${className}`} aria-labelledby={titleId}
-      onCancel={(e) => { e.preventDefault(); e.stopPropagation(); onClose() }}
+      onCancel={(e) => { e.preventDefault(); e.stopPropagation(); if (!persistent) onClose() }}
       onKeyDown={(e) => {
         e.stopPropagation()
         if (e.key !== 'Tab') return
@@ -31,7 +31,7 @@ export function AccessibleDialog({ title, children, onClose, className = '' }) {
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
       }}
       onClick={(e) => {
-        if (e.target !== e.currentTarget) return
+        if (persistent || e.target !== e.currentTarget) return
         const r = e.currentTarget.getBoundingClientRect()
         if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) onClose()
       }}>
@@ -47,6 +47,9 @@ export function AccessibleDialog({ title, children, onClose, className = '' }) {
 export default function ConfirmDialog({ message, confirmLabel = 'Confirm', danger = false, onAnswer }) {
   return (
     <AccessibleDialog title="Please confirm" onClose={() => onAnswer(false)}>
+      <div className={`confirm-badge${danger ? ' danger' : ''}`} aria-hidden="true">
+        {danger ? <AlertTriangle size={22} /> : <Info size={22} />}
+      </div>
       <p className="modal-text">{message}</p>
       <div className="actions modal-actions">
         <button type="button" className="secondary" onClick={() => onAnswer(false)} autoFocus>Cancel</button>
