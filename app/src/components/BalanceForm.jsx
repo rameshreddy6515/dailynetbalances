@@ -81,7 +81,12 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
 
   useEffect(() => {
     if (!selectMerchant) return
-    setForm((f) => ({ ...f, merchant: selectMerchant }))
+    setOpeningSource(null)
+    setForm((f) => {
+      if (f.merchant === selectMerchant) return f
+      closingTouched.current = false
+      return { ...f, merchant: selectMerchant, opening: '', closing: '', bank: '', misc: '' }
+    })
   }, [selectMerchant])
 
   useEffect(() => {
@@ -243,7 +248,12 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
                 : []),
             ]}
             value={form.merchant}
-            onChange={(v) => setForm((f) => ({ ...f, merchant: v }))}
+            onChange={(v) => {
+              if (v === form.merchant) return
+              closingTouched.current = false
+              setOpeningSource(null)
+              setForm((f) => ({ ...f, merchant: v, opening: '', closing: '', bank: '', misc: '' }))
+            }}
             placeholder="Select a merchant"
             searchable
           />
