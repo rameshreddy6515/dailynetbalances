@@ -1,22 +1,13 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, Info } from 'lucide-react'
+import Select from './Select'
 import { fmt, toNumber } from '../format'
 
-const PCTS = [1.89, 2, 2.5, 2.89, 3]
+import { DEFAULT_PCTS, DEFAULT_TYPES } from '../chargeData'
 
-const TYPES = [
-  ['SLPE Gold / Marine', 1.56],
-  ['SLPE Business', 2.62],
-  ['SLPE Ocean', 1.61],
-  ['EESHA Ferry', 1.65],
-  ['EESHA Travel', 2.63],
-  ['EESHA Water', 1.59],
-  ['EmmiPay', 2.0],
-]
-
-export default function ChargeCalc({ currency }) {
+export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = DEFAULT_PCTS }) {
   const [amount, setAmount] = useState('')
-  const [pct, setPct] = useState('')
+  const [typeName, setTypeName] = useState(() => localStorage.getItem('chargeTypeLast') || '')
   const [sel, setSel] = useState('')
   const [reveal, setReveal] = useState(false)
 
@@ -28,6 +19,7 @@ export default function ChargeCalc({ currency }) {
   const amt = toNumber(amount)
   const rate = toNumber(sel)
   const charges = (amt * rate) / 100
+  const pct = String(types.find(([n]) => n === typeName)?.[1] ?? '')
   const pctAmt = (amt * toNumber(pct)) / 100
   const ccAmt = amt - charges
   const finalAmt = charges - pctAmt
@@ -48,14 +40,18 @@ export default function ChargeCalc({ currency }) {
             </span>
           )}
         </span>
-        <select value={pct} onChange={(e) => setPct(e.target.value)}>
-          <option value="">Select merchant type</option>
-          {TYPES.map(([name, v]) => <option key={name} value={v}>{name}</option>)}
-        </select>
+        <Select
+          searchable
+          label="Merchant type"
+          placeholder="Select merchant type"
+          options={types.map(([name]) => ({ value: name, label: name }))}
+          value={typeName}
+          onChange={(v) => { setTypeName(v); localStorage.setItem('chargeTypeLast', v) }}
+        />
       </label>
       <fieldset className="pct-presets">
         <legend className="charge-legend">Charge rate{rate > 0 && <> — deducts {fmt(charges, currency)}</>}</legend>
-        {PCTS.map((v) => (
+        {presets.map((v) => (
           <label key={v} className={`pct-chip${rate === v ? ' on' : ''}`}>
             <input
               type="radio"

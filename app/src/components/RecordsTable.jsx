@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   FileText,
+  Inbox,
   X,
   Loader2,
   MoreHorizontal,
@@ -669,7 +670,10 @@ export default function RecordsTable({
                 ) : pageRows.length === 0 ? (
                   <tr>
                     <td colSpan={COLS} className="empty">
-                      {search || filters.merchant || filters.from || filters.to ? 'No matching records. Try changing the search or filters.' : 'No records yet. Use New Entry to add your first balance.'}
+                      <div className="empty-state">
+                        <Inbox size={30} aria-hidden="true" />
+                        <p>{search || filters.merchant || filters.from || filters.to ? 'No matching records. Try changing the search or filters.' : 'No records yet. Use New Entry to add your first balance.'}</p>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -711,7 +715,12 @@ export default function RecordsTable({
           </div>
 
           <div className="record-cards no-print">
-            {!loading && !pageRows.length && <p className="empty">No matching records. Add an entry or adjust your filters.</p>}
+            {!loading && !pageRows.length && (
+              <div className="empty-state">
+                <Inbox size={30} aria-hidden="true" />
+                <p>No matching records. Add an entry or adjust your filters.</p>
+              </div>
+            )}
             {loading
               ? Array.from({ length: 4 }).map((_, i) => (
                   <div key={`rskel-${i}`} className="record-card">

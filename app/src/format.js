@@ -43,11 +43,19 @@ export const latestWalletEntries = (rows) => {
   return [...latest.values()].sort((a, b) => a.merchant_name.localeCompare(b.merchant_name))
 }
 
+let dateFormat = 'dmy'
+export const setDateFormat = (f) => {
+  dateFormat = ['dmy', 'mdy', 'iso'].includes(f) ? f : 'dmy'
+}
+
 export const displayDate = (value, withTime = false) => {
   if (!value) return 'Not recorded'
   const date = new Date(withTime ? value : `${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return 'Not recorded'
-  return withTime ? date.toLocaleString() : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  if (withTime) return date.toLocaleString()
+  if (dateFormat === 'iso') return String(value).slice(0, 10)
+  const locale = dateFormat === 'mdy' ? 'en-US' : 'en-GB'
+  return date.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 export const localToday = () => {

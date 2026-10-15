@@ -15,6 +15,10 @@ import CountUp from './components/CountUp'
 import MerchantAvatar from './components/MerchantAvatar'
 import CalcPad from './components/CalcPad'
 import ChargeCalc from './components/ChargeCalc'
+import { DEFAULT_PCTS, DEFAULT_TYPES } from './chargeData'
+import ChargeTypes from './components/ChargeTypes'
+import PresetRates from './components/PresetRates'
+import pkg from '../package.json'
 import { registerSW } from './pwa'
 import {
   AlertTriangle,
@@ -26,20 +30,26 @@ import {
   Search,
   TrendingUp,
   Command,
+  Download,
   Info,
   Landmark,
   List,
+  ListOrdered,
   LogOut,
   Moon,
+  Percent,
   Plus,
+  RefreshCw,
   Settings,
   SlidersHorizontal,
   Store,
   Sun,
+  Trash2,
+  Upload,
   Wallet,
   X,
 } from 'lucide-react'
-import { changeOf, fmt, toNumber, CURRENCIES, localToday, latestWalletEntries, displayDate, setNumberLocale } from './format'
+import { changeOf, fmt, toNumber, CURRENCIES, localToday, latestWalletEntries, displayDate, setNumberLocale, setDateFormat } from './format'
 
 const OPTIONAL_COLS = ['entry_type', 'misc_expense', 'bank_amount']
 const TODAY_LABEL = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
@@ -69,6 +79,10 @@ const ACCENTS = [
   { value: 'sunset', label: 'Sunset', swatch: 'linear-gradient(135deg,#f97316,#ef4444)' },
   { value: 'rose', label: 'Rose', swatch: 'linear-gradient(135deg,#ec4899,#f43f5e)' },
   { value: 'slate', label: 'Slate', swatch: 'linear-gradient(135deg,#334155,#64748b)' },
+  { value: 'violet', label: 'Violet', swatch: 'linear-gradient(135deg,#8b5cf6,#7c3aed)' },
+  { value: 'teal', label: 'Teal', swatch: 'linear-gradient(135deg,#14b8a6,#0d9488)' },
+  { value: 'amber', label: 'Amber', swatch: 'linear-gradient(135deg,#f59e0b,#d97706)' },
+  { value: 'lime', label: 'Lime', swatch: 'linear-gradient(135deg,#84cc16,#65a30d)' },
 ]
 
 function ToastItem({ t, onClose, onAction }) {
@@ -128,6 +142,27 @@ export default function App() {
   const [pendingOpen, setPendingOpen] = useState(false)
   const [calcOpen, setCalcOpen] = useState(false)
   const [chargeOpen, setChargeOpen] = useState(false)
+  const [typesOpen, setTypesOpen] = useState(false)
+  const [presetsOpen, setPresetsOpen] = useState(false)
+  const [chargeTypes, setChargeTypes] = useState(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('chargeTypes'))
+      return Array.isArray(v) ? v : DEFAULT_TYPES
+    } catch {
+      return DEFAULT_TYPES
+    }
+  })
+  const [chargePresets, setChargePresets] = useState(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('chargePresets'))
+      return Array.isArray(v) && v.length ? v : DEFAULT_PCTS
+    } catch {
+      return DEFAULT_PCTS
+    }
+  })
+  const [dateFmt, setDateFmt] = useState(() => localStorage.getItem('datefmt') || 'dmy')
+  const [density, setDensity] = useState(() => localStorage.getItem('density') || 'comfortable')
+  const settingsRestoreRef = useRef(null)
   const [bankOpen, setBankOpen] = useState(false)
   const [walletLoading, setWalletLoading] = useState(true)
   const [walletError, setWalletError] = useState('')
@@ -306,6 +341,24 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('currency', currency)
   }, [currency])
+
+  useEffect(() => {
+    localStorage.setItem('chargeTypes', JSON.stringify(chargeTypes))
+  }, [chargeTypes])
+
+  useEffect(() => {
+    localStorage.setItem('chargePresets', JSON.stringify(chargePresets))
+  }, [chargePresets])
+
+  useEffect(() => {
+    setDateFormat(dateFmt)
+    localStorage.setItem('datefmt', dateFmt)
+  }, [dateFmt])
+
+  useEffect(() => {
+    document.documentElement.dataset.density = density === 'compact' ? 'compact' : ''
+    localStorage.setItem('density', density)
+  }, [density])
   const [reminder, setReminder] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('reminderSettings')) || { enabled: false, time: '21:00' }
@@ -384,10 +437,11 @@ export default function App() {
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
-  const dark = theme === 'dark' || (theme === 'system' && sysDark)
+  const dark = theme === 'dark' || theme === 'black' || (theme === 'system' && sysDark)
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : ''
+    document.documentElement.dataset.oled = theme === 'black' ? '1' : ''
     localStorage.setItem('theme', theme)
   }, [dark, theme])
 
@@ -799,6 +853,48 @@ export default function App() {
     await loadRecords(filters)
     await loadWallet()
     setRestoring(false)
+  }
+
+  const resetLocal = async () => {
+    const ok = await askConfirm('Clear local drafts, settings, and calculator lists? Cloud records are untouched.', {
+      confirmLabel: 'Reset',
+      danger: true,
+    })
+    if (!ok) return
+    localStorage.clear()
+    location.reload()
+  }
+
+  const deleteAllRecords = async () => {
+    const ok = await askConfirm('Permanently delete ALL balance records for every merchant?', {
+      confirmLabel: 'Delete all',
+      danger: true,
+    })
+    if (!ok) return
+    const sure = await askConfirm('This cannot be undone. Continue?', {
+      confirmLabel: 'Yes, delete everything',
+      danger: true,
+    })
+    if (!sure || !supabase) return
+    const { error } = await supabase.from('daily_balances').delete().not('id', 'is', null)
+    if (error) {
+      notify(`Delete failed: ${error.message}`, 'error')
+      return
+    }
+    notify('All records deleted.', 'success')
+    await loadRecords(filters)
+    await loadWallet()
+  }
+
+  const checkUpdates = async () => {
+    notify('Checking for updates…', 'info')
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration()
+      await reg?.update()
+    } catch {
+      /* no service worker */
+    }
+    setTimeout(() => location.reload(), 800)
   }
 
   const copyRecord = (row) => {
@@ -1238,7 +1334,7 @@ export default function App() {
             <summary>How is this calculated?</summary>
             <p>Merchant charges = Amount × charge rate. Final CC amount = Amount − charge rate amount. Retailer misc charges = charge rate amount − merchant type amount.</p>
           </details>
-          <ChargeCalc currency={currency} />
+          <ChargeCalc currency={currency} types={chargeTypes} presets={chargePresets} />
           <div className="calc-swap">
             <button type="button" className="secondary small" onClick={() => { setChargeOpen(false); setCalcOpen(true) }}>
               Standard calculator
@@ -1286,6 +1382,28 @@ export default function App() {
               onDelete={deleteMerchant}
               onSetStart={setMerchantStart}
             />
+        </AccessibleDialog>
+      )}
+
+      {typesOpen && (
+        <AccessibleDialog title="Merchant Types" onClose={() => setTypesOpen(false)}>
+          <ChargeTypes
+            types={chargeTypes}
+            onChange={setChargeTypes}
+            onConfirm={askConfirm}
+            notify={notify}
+          />
+        </AccessibleDialog>
+      )}
+
+      {presetsOpen && (
+        <AccessibleDialog title="Rate Presets" onClose={() => setPresetsOpen(false)}>
+          <PresetRates
+            rates={chargePresets}
+            onChange={setChargePresets}
+            onConfirm={askConfirm}
+            notify={notify}
+          />
         </AccessibleDialog>
       )}
 
@@ -1345,6 +1463,12 @@ export default function App() {
             <button type="button" className="secondary sheet-action" onClick={() => { setSettingsOpen(false); setShowMerchants(true) }}>
               <Store size={15} /> Merchants
             </button>
+            <button type="button" className="secondary sheet-action" onClick={() => { setSettingsOpen(false); setTypesOpen(true) }}>
+              <Percent size={15} /> Merchant types
+            </button>
+            <button type="button" className="secondary sheet-action" onClick={() => { setSettingsOpen(false); setPresetsOpen(true) }}>
+              <ListOrdered size={15} /> Rate presets
+            </button>
             <button type="button" className="secondary sheet-action" onClick={() => { setSettingsOpen(false); setDashOpen(true) }}>
               <SlidersHorizontal size={15} /> Customize dashboard
             </button>
@@ -1372,16 +1496,53 @@ export default function App() {
                   options={[{ value: 'in', label: '1,25,000' }, { value: 'us', label: '125,000' }]}
                   value={indianFmt ? 'in' : 'us'} onChange={(v) => setIndianFmt(v === 'in')} />
               </label>
+              <label>Date format
+                <Select label="Date format"
+                  options={[{ value: 'dmy', label: '15 Oct 2026' }, { value: 'mdy', label: 'Oct 15, 2026' }, { value: 'iso', label: '2026-10-15' }]}
+                  value={dateFmt} onChange={setDateFmt} />
+              </label>
               <label>Theme
                 <Select label="Theme"
-                  options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]}
+                  options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'black', label: 'Black (OLED)' }]}
                   value={theme} onChange={setTheme} />
+              </label>
+              <label>Density
+                <Select label="Density"
+                  options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]}
+                  value={density} onChange={setDensity} />
               </label>
               <label>Accent
                 <Select label="Accent color"
                   options={ACCENTS.map((a) => ({ value: a.value, label: a.label, node: <span className="merchant-cell"><span className="accent-dot" style={{ background: a.swatch }} />{a.label}</span> }))}
                   value={accent} onChange={setAccent} />
               </label>
+            </div>
+          </div>
+          <div className="sheet-section">
+            <h3>Data</h3>
+            <button type="button" className="secondary sheet-action" onClick={backupData}>
+              <Download size={15} /> Export backup
+            </button>
+            <button type="button" className="secondary sheet-action" disabled={restoring} onClick={() => settingsRestoreRef.current?.click()}>
+              <Upload size={15} /> {restoring ? 'Restoring…' : 'Restore backup'}
+            </button>
+            <input ref={settingsRestoreRef} type="file" accept=".json,application/json" hidden
+              onChange={(e) => { restoreData(e.target.files?.[0]); e.target.value = '' }} />
+          </div>
+          <div className="sheet-section danger-section">
+            <h3>Danger zone</h3>
+            <button type="button" className="secondary sheet-action" onClick={resetLocal}>
+              <RefreshCw size={15} /> Reset local data
+            </button>
+            <button type="button" className="danger sheet-action" onClick={deleteAllRecords}>
+              <Trash2 size={15} /> Delete all records
+            </button>
+          </div>
+          <div className="sheet-section">
+            <h3>About</h3>
+            <div className="about-line">
+              <span className="muted">Daily Net Balance v{pkg.version}</span>
+              <button type="button" className="small secondary" onClick={checkUpdates}>Check for updates</button>
             </div>
           </div>
         </AccessibleDialog>
