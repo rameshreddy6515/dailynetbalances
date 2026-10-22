@@ -1968,11 +1968,26 @@ tr.row-worst td:first-child {
   background: transparent;
 }
 .select-search input:focus {
-  box-shadow: none;
+  border-color: transparent;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
 }
 .select-items {
   max-height: 240px;
   overflow-y: auto;
+}
+.merchant-select .select-items {
+  max-height: 220px;
+  overflow-y: scroll;
+  scrollbar-color: var(--primary) var(--hover);
+  scrollbar-width: thin;
+}
+.merchant-select .select-items::-webkit-scrollbar {
+  width: 8px;
+}
+.merchant-select .select-items::-webkit-scrollbar-thumb {
+  border: 2px solid var(--input-bg);
+  border-radius: 8px;
+  background: var(--primary);
 }
 .select-item {
   width: 100%;
@@ -1989,10 +2004,11 @@ tr.row-worst td:first-child {
   font-weight: 600;
   font-size: 14px;
 }
-.select-item:hover {
+.select-item:hover:not(.active) {
   background: var(--hover);
 }
 .select-item.active {
+  background: var(--calc-bg);
   color: var(--primary);
 }
 .select-empty {
@@ -2749,6 +2765,11 @@ tfoot td {
 .workspace-section .sec-head h2 { margin: 0; font-size: 20px; }
 #analytics > .sec-head { margin-bottom: 0; }
 #analytics-content { margin-top: 24px; }
+#analytics.analytics-collapsed { padding: 12px 20px; }
+#analytics.analytics-collapsed > .sec-head { min-height: 44px; }
+.analytics-toggle { min-height: 40px; }
+.analytics-toggle svg { transition: transform 0.2s ease; }
+.analytics-toggle svg.flip { transform: rotate(180deg); }
 .records-section .toolbar { gap: 16px; margin-bottom: 20px; }
 .records-section .toolbar > label { flex: 1 1 160px; min-width: 0; align-content: start; }
 .records-section .toolbar .actions { justify-content: space-between; padding-top: 16px; }
@@ -2912,7 +2933,8 @@ tfoot td {
 .switch-input:focus-visible + .switch { outline: 3px solid var(--focus); outline-offset: 4px; }
 .switch { border: 1px solid var(--input-border); }
 .select-item.active { color: var(--focus); }
-.select-item:focus-visible { outline-offset: -3px; background: var(--hover); }
+.select-item:focus-visible { outline-offset: -3px; }
+.select-item:focus-visible:not(.active) { background: var(--hover); }
 .dp-day:focus-visible { outline-offset: -3px; }
 [aria-invalid='true'] { border-color: var(--neg); }
 .accessible-dialog {

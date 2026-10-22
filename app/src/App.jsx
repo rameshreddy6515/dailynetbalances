@@ -1260,11 +1260,11 @@ export default function App() {
         </div>
         <p className="ptr-hint no-print" aria-hidden="true">↓ Pull down to refresh</p>
         {sectionNodes.records}
-        <section id="analytics" className="workspace-section no-print">
+        <section id="analytics" className={`workspace-section no-print${analyticsOpen ? '' : ' analytics-collapsed'}`}>
           <div className="sec-head">
             <h2>Analytics</h2>
-            <button type="button" className="secondary" aria-expanded={analyticsOpen} aria-controls="analytics-content" onClick={() => setAnalyticsOpen((o) => !o)}>
-              {analyticsOpen ? 'Collapse' : 'Expand'} <ChevronDown size={16} />
+            <button type="button" className="secondary small analytics-toggle" aria-expanded={analyticsOpen} aria-controls="analytics-content" onClick={() => setAnalyticsOpen((o) => !o)}>
+              {analyticsOpen ? 'Collapse' : 'Expand'} <ChevronDown size={16} className={analyticsOpen ? 'flip' : ''} />
             </button>
           </div>
           <div id="analytics-content" className={`collapse${analyticsOpen ? '' : ' closed'}`}>

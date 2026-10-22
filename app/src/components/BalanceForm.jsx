@@ -248,7 +248,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
       <div className="grid">
         <label>
           Merchant name
-          <Select label="Merchant name" required invalid={!!validation && !form.merchant}
+          <Select label="Merchant name" className="merchant-select" required invalid={!!validation && !form.merchant}
             options={[
               ...merchants.map((m) => ({ value: m, label: m, node: <span className="merchant-cell"><MerchantAvatar name={m} />{m}</span> })),
               ...(form.merchant && !merchants.includes(form.merchant)
