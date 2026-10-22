@@ -58,7 +58,10 @@ export const displayDate = (value, withTime = false) => {
   return date.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export const localToday = () => {
+export const localDay = (offsetDays = 0) => {
   const d = new Date()
+  d.setDate(d.getDate() + offsetDays)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+
+export const localToday = () => localDay(0)

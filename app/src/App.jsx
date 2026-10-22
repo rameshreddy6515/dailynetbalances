@@ -22,6 +22,8 @@ import pkg from '../package.json'
 import { registerSW } from './pwa'
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   Calculator,
   CheckCircle2,
   ChevronDown,
@@ -49,14 +51,14 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import { changeOf, fmt, toNumber, CURRENCIES, localToday, latestWalletEntries, displayDate, setNumberLocale, setDateFormat } from './format'
+import { changeOf, fmt, toNumber, CURRENCIES, localToday, localDay, latestWalletEntries, displayDate, setNumberLocale, setDateFormat } from './format'
 
 const OPTIONAL_COLS = ['entry_type', 'misc_expense', 'bank_amount']
 const TODAY_LABEL = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
 const DEFAULT_CFG = {
   statOrder: ['wallet', 'today', 'merchants', 'entries', 'bank', 'misc'],
-  statHidden: ['misc'],
+  statHidden: ['misc', 'entries'],
   sectionOrder: ['charts', 'leaderboard'],
   sectionHidden: [],
 }
@@ -194,10 +196,29 @@ export default function App() {
   const [entryOpen, setEntryOpen] = useState(false)
   const [entryBusy, setEntryBusy] = useState(false)
   const [entryKey, setEntryKey] = useState(0)
+  const [pageAtBottom, setPageAtBottom] = useState(false)
+  const [pageCanScroll, setPageCanScroll] = useState(false)
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
   const [flashId, setFlashId] = useState(null)
   const [search, setSearch] = useState('')
   const entryRef = useRef(null)
+  useEffect(() => {
+    const updateScrollButton = () => {
+      const bottom = document.documentElement.scrollHeight - window.innerHeight
+      setPageCanScroll(bottom > 240)
+      setPageAtBottom(bottom > 80 && window.scrollY >= bottom - 80)
+    }
+    updateScrollButton()
+    window.addEventListener('scroll', updateScrollButton, { passive: true })
+    window.addEventListener('resize', updateScrollButton)
+    const observer = new ResizeObserver(updateScrollButton)
+    observer.observe(document.documentElement)
+    return () => {
+      window.removeEventListener('scroll', updateScrollButton)
+      window.removeEventListener('resize', updateScrollButton)
+      observer.disconnect()
+    }
+  }, [])
   const visibleRecords = useMemo(() => {
     const term = search.trim().toLowerCase()
     return term ? records.filter((r) => `${r.merchant_name || ''} ${r.notes || ''} ${r.balance_date || ''}`.toLowerCase().includes(term)) : records
@@ -254,7 +275,7 @@ export default function App() {
     const previousFocus = document.activeElement
     const overflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    entryRef.current?.focus()
+    entryRef.current?.querySelector('.select-btn')?.focus()
     return () => {
       document.body.style.overflow = overflow
       if (previousFocus?.isConnected) previousFocus.focus()
@@ -270,7 +291,8 @@ export default function App() {
         if (!entryBusy) setEntryOpen(false)
       }
       if (e.key !== 'Tab') return
-      const items = [...entryRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]')].filter((el) => el.getClientRects().length)
+      const items = [...entryRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])')]
+        .filter((el) => el.getClientRects().length && el.tabIndex >= 0 && !el.closest('[inert], [aria-hidden="true"]'))
       const first = items[0]
       const last = items[items.length - 1]
       if (e.shiftKey && (document.activeElement === first || document.activeElement === entryRef.current)) {
@@ -635,10 +657,20 @@ export default function App() {
     if (!ok) return false
     if (!supabase) return false
 
-    const { error } = await supabase.from('merchants').delete().eq('merchant_name', name)
+    const { data, error } = await supabase
+      .from('merchants')
+      .delete()
+      .eq('merchant_name', name)
+      .select('id')
     if (error) {
       setStatus({ type: 'error', text: error.message })
       notify(`Could not delete merchant: ${error.message}`, 'error')
+      return false
+    }
+    if (!data || data.length === 0) {
+      const msg = `Delete of "${name}" was blocked by the database — add a DELETE policy on the merchants table (see supabase.sql).`
+      setStatus({ type: 'error', text: msg })
+      notify(msg, 'error')
       return false
     }
 
@@ -930,7 +962,10 @@ export default function App() {
   const wallet = useMemo(() => {
     const entries = latestWalletEntries(walletRows)
     const todayStr = localToday()
+    const yesterdayStr = localDay(-1)
     const todayChange = walletRows.reduce((total, row) => total + (row.balance_date === todayStr ? changeOf(row) : 0), 0)
+    const yesterdayChange = walletRows.reduce((total, row) => total + (row.balance_date === yesterdayStr ? changeOf(row) : 0), 0)
+    const hasYesterday = walletRows.some((r) => r.balance_date === yesterdayStr)
     const total = entries.reduce((sum, row) => sum + Math.round(toNumber(row.closing_balance) * 100), 0) / 100
     const bankByMerchant = {}
     let bankTotal = 0
@@ -939,7 +974,7 @@ export default function App() {
       if (amt) bankByMerchant[row.merchant_name] = (bankByMerchant[row.merchant_name] || 0) + amt
       bankTotal += amt
     }
-    return { total, todayChange, entries, bankByMerchant, bankTotal }
+    return { total, todayChange, yesterdayChange, hasYesterday, entries, bankByMerchant, bankTotal }
   }, [walletRows])
 
   const bankMoves = useMemo(
@@ -1045,6 +1080,11 @@ export default function App() {
       format: (v) => `${v >= 0 ? '+' : ''}${fmt(v, currency)}`,
       lbl: "Today's Change",
       icon: <TrendingUp size={17} className="stat-icon" aria-hidden="true" />,
+      sub: wallet.hasYesterday ? (
+        <span className={`stat-sub ${wallet.todayChange - wallet.yesterdayChange >= 0 ? 'up' : 'down'}`}>
+          {wallet.todayChange - wallet.yesterdayChange >= 0 ? '▲' : '▼'} {fmt(Math.abs(wallet.todayChange - wallet.yesterdayChange), currency)} vs yesterday
+        </span>
+      ) : null,
     },
     merchants: { cls: 'stat-1', value: stats.merchants, format: (v) => Math.round(v), lbl: 'Merchants', icon: <Store size={17} className="stat-icon" aria-hidden="true" /> },
     entries: { cls: 'stat-2', value: stats.entries, format: (v) => Math.round(v), lbl: 'Entries shown', icon: <List size={17} className="stat-icon" aria-hidden="true" /> },
@@ -1205,6 +1245,7 @@ export default function App() {
                     {statDefs[k].icon}
                     <div className="num"><CountUp value={statDefs[k].value} format={statDefs[k].format} /></div>
                     <div className="lbl">{statDefs[k].lbl}</div>
+                    {statDefs[k].sub}
                   </div>
                 ))}
         </div>
@@ -1408,9 +1449,9 @@ export default function App() {
       )}
 
       <div className="entry-overlay no-print" hidden={!entryOpen} onClick={(e) => { if (e.target === e.currentTarget) closeEntry() }}>
-        <aside className="entry-panel" ref={entryRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="entry-title">
+        <aside className="entry-panel" ref={entryRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="entry-title" aria-describedby="entry-description">
           <div className="entry-panel-head">
-            <div><h2 id="entry-title">{editingRow ? 'Edit entry' : copySource ? 'Copy entry' : 'New entry'}</h2><p>Record the actual closing balance for this merchant.</p></div>
+            <div><h2 id="entry-title">{editingRow ? 'Edit entry' : copySource ? 'Copy entry' : 'New entry'}</h2><p id="entry-description">Record the actual closing balance for this merchant.</p></div>
             <button type="button" className="secondary icon-button" aria-label="Close entry panel" disabled={entryBusy} onClick={closeEntry}><X size={20} /></button>
           </div>
           <BalanceForm key={entryKey} merchants={merchants} initialBalances={initialBalances} editingRow={editingRow}
@@ -1443,6 +1484,24 @@ export default function App() {
           <span>Calc</span>
         </button>
       </nav>
+
+      {pageCanScroll && !entryOpen && (
+        <button
+          type="button"
+          className="scroll-jump no-print"
+          aria-label={pageAtBottom ? 'Scroll to top' : 'Scroll to bottom'}
+          title={pageAtBottom ? 'Scroll to top' : 'Scroll to bottom'}
+          onClick={() => {
+            const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+            window.scrollTo({
+              top: pageAtBottom ? 0 : document.documentElement.scrollHeight,
+              behavior,
+            })
+          }}
+        >
+          {pageAtBottom ? <ArrowUp size={20} /> : <ArrowDown size={20} />}
+        </button>
+      )}
 
       <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
 

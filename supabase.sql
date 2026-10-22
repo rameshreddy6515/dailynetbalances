@@ -62,6 +62,12 @@ create policy "Allow merchant update for everyone"
   using (true)
   with check (true);
 
+drop policy if exists "Allow merchant delete for everyone" on public.merchants;
+create policy "Allow merchant delete for everyone"
+  on public.merchants
+  for delete
+  using (true);
+
 drop policy if exists "Allow insert for everyone" on public.daily_balances;
 create policy "Allow insert for everyone"
   on public.daily_balances
@@ -97,6 +103,7 @@ create policy "Allow delete for everyone"
 drop policy if exists "Allow merchant insert for everyone" on public.merchants;
 drop policy if exists "Allow merchant read for everyone" on public.merchants;
 drop policy if exists "Allow merchant update for everyone" on public.merchants;
+drop policy if exists "Allow merchant delete for everyone" on public.merchants;
 drop policy if exists "Allow insert for everyone" on public.daily_balances;
 drop policy if exists "Allow read for everyone" on public.daily_balances;
 drop policy if exists "Allow update for everyone" on public.daily_balances;

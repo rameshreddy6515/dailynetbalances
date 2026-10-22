@@ -88,7 +88,6 @@ export default function Login() {
                   className="pw-toggle"
                   aria-label={showPw ? 'Hide password' : 'Show password'}
                   onClick={() => setShowPw((s) => !s)}
-                  tabIndex={-1}
                 >
                   {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -115,7 +114,11 @@ export default function Login() {
           <Link m="signup">Create account</Link>
           <Link m="magic">Email me a login link</Link>
         </div>
-        {msg && <div className={`message ${msg.type}`}>{msg.text}</div>}
+        {msg && (
+          <div className={`message ${msg.type}`} role={msg.type === 'error' ? 'alert' : 'status'}>
+            {msg.text}
+          </div>
+        )}
       </div>
     </div>
   )

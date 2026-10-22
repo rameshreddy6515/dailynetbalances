@@ -281,10 +281,14 @@ export default function RecordsTable({
         tip: 'End of day − Opening + Cash Out + To Bank + Misc',
         cell: (r) => {
           const c = changeOf(r)
+          const status = r.id === bestId ? 'Highest change' : r.id === worstId ? 'Lowest change' : ''
           return (
-            <span className={c >= 0 ? 'pos' : 'neg'}>
-              {c >= 0 ? '+' : '−'}
-              {fmt(Math.abs(c), currency)}
+            <span className="change-cell">
+              <span className={c >= 0 ? 'pos' : 'neg'} aria-label={`${c >= 0 ? 'Increase' : 'Decrease'} ${fmt(Math.abs(c), currency)}`}>
+                {c >= 0 ? '+' : '−'}
+                {fmt(Math.abs(c), currency)}
+              </span>
+              {status && <span className="record-status">{status}</span>}
             </span>
           )
         },
@@ -750,14 +754,16 @@ export default function RecordsTable({
                       >
                         <div className="rc-head">
                           <span className="merchant-cell"><MerchantAvatar name={row.merchant_name} /><b>{row.merchant_name}</b></span>
-                          <b className={`rc-change ${change >= 0 ? 'pos' : 'neg'}`}>
+                            <b className={`rc-change ${change >= 0 ? 'pos' : 'neg'}`} aria-label={`Net change ${change >= 0 ? 'increase' : 'decrease'} ${fmt(Math.abs(change), currency)}`}>
                             {change >= 0 ? '+' : '−'}
                             {fmt(Math.abs(change), currency)}
                           </b>
                         </div>
                         <div className="rc-nums">
                           <span className="muted">{row.balance_date}</span>
-                          <span>
+                            {row.id === bestId && <span className="record-status">Highest change</span>}
+                            {row.id === worstId && <span className="record-status">Lowest change</span>}
+                            <span>
                             Open <b>{fmt(row.opening_balance, currency)}</b>
                             {chainBreaks.has(row.id) && <span className="adj-badge" data-tip={`Opening differs from previous closing (${fmt(chainBreaks.get(row.id), currency)})`}>Adj</span>}
                           </span>

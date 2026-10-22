@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
 import { AlertTriangle, Info, X } from 'lucide-react'
 
-export function AccessibleDialog({ title, children, onClose, className = '', persistent = false }) {
+export function AccessibleDialog({ title, children, onClose, className = '', persistent = false, ariaDescribedBy }) {
   const ref = useRef(null)
   const titleId = useId()
 
@@ -20,11 +20,13 @@ export function AccessibleDialog({ title, children, onClose, className = '', per
 
   return (
     <dialog ref={ref} className={`accessible-dialog no-print ${className}`} aria-labelledby={titleId}
+      aria-describedby={ariaDescribedBy}
       onCancel={(e) => { e.preventDefault(); e.stopPropagation(); if (!persistent) onClose() }}
       onKeyDown={(e) => {
         e.stopPropagation()
         if (e.key !== 'Tab') return
-        const items = [...e.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]')].filter((el) => el.getClientRects().length)
+        const items = [...e.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex]:not([tabindex="-1"])')]
+          .filter((el) => el.getClientRects().length && el.tabIndex >= 0 && !el.closest('[inert], [aria-hidden="true"]'))
         const first = items[0]
         const last = items[items.length - 1]
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
@@ -45,12 +47,13 @@ export function AccessibleDialog({ title, children, onClose, className = '', per
 }
 
 export default function ConfirmDialog({ message, confirmLabel = 'Confirm', danger = false, onAnswer }) {
+  const descriptionId = useId()
   return (
-    <AccessibleDialog title="Please confirm" onClose={() => onAnswer(false)}>
+    <AccessibleDialog title="Please confirm" onClose={() => onAnswer(false)} ariaDescribedBy={descriptionId}>
       <div className={`confirm-badge${danger ? ' danger' : ''}`} aria-hidden="true">
         {danger ? <AlertTriangle size={22} /> : <Info size={22} />}
       </div>
-      <p className="modal-text">{message}</p>
+      <p id={descriptionId} className="modal-text">{message}</p>
       <div className="actions modal-actions">
         <button type="button" className="secondary" onClick={() => onAnswer(false)} autoFocus>Cancel</button>
         <button type="button" className={danger ? 'danger' : 'primary'} onClick={() => onAnswer(true)}>{confirmLabel}</button>
