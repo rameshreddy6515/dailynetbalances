@@ -19,8 +19,17 @@ const blank = () => ({
   misc: '',
   closing: '',
   entryType: 'daily',
+  tags: '',
   notes: '',
 })
+
+const SUGGESTED_TAGS = ['settlement', 'correction', 'misc', 'refund']
+
+const parseTags = (value) =>
+  [...new Set(String(value || '')
+    .split(',')
+    .map((t) => t.trim().toLowerCase().replace(/\s+/g, '-'))
+    .filter(Boolean))]
 
 const loadDraft = () => {
   try {
@@ -72,6 +81,7 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
         misc: String(editingRow.misc_expense ?? 0),
         closing: String(editingRow.closing_balance ?? 0),
         entryType: editingRow.entry_type || 'daily',
+        tags: (editingRow.tags || []).join(', '),
         notes: editingRow.notes || '',
       })
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -105,6 +115,7 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
       misc: String(copySource.misc_expense ?? 0),
       closing: String(copySource.closing_balance ?? 0),
       entryType: copySource.entry_type || 'daily',
+      tags: (copySource.tags || []).join(', '),
       notes: copySource.notes || '',
     })
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -191,6 +202,7 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
       misc_expense: misc,
       entry_type: form.entryType,
       closing_balance: closing,
+      tags: editingRow && editingRow.tags === undefined ? undefined : parseTags(form.tags),
       notes: form.notes.trim() || null,
     }
     if (!payload.merchant_name || !payload.balance_date) {
@@ -379,6 +391,36 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
           Expected closing {fmt(expectedClosing, currency)} · Wallet change (End of day − Opening):{' '}
           {walletChange >= 0 ? '+' : '−'}{fmt(Math.abs(walletChange), currency)}
         </div>
+      </div>
+
+      <label>
+        Tags
+        <input
+          type="text"
+          value={form.tags}
+          onChange={set('tags')}
+          placeholder="e.g. settlement, correction"
+          aria-describedby="tag-suggestions"
+        />
+      </label>
+      <div className="tag-suggestions" id="tag-suggestions">
+        {SUGGESTED_TAGS.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            className={`tag-chip tag-btn${parseTags(form.tags).includes(tag) ? ' on' : ''}`}
+            aria-pressed={parseTags(form.tags).includes(tag)}
+            onClick={() =>
+              setForm((f) => {
+                const tags = parseTags(f.tags)
+                const next = tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag]
+                return { ...f, tags: next.join(', ') }
+              })
+            }
+          >
+            {tag}
+          </button>
+        ))}
       </div>
 
       <label>

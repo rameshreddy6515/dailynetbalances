@@ -5,6 +5,7 @@ export default function Select({ options, value, onChange, placeholder = 'Select
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const ref = useRef(null)
+  const blurTimeout = useRef(null)
   const listId = useId()
 
   useEffect(() => {
@@ -12,19 +13,23 @@ export default function Select({ options, value, onChange, placeholder = 'Select
       if (ref.current && !ref.current.contains(e.target)) setOpen(false)
     }
     document.addEventListener('pointerdown', close)
-    return () => document.removeEventListener('pointerdown', close)
+    return () => {
+      document.removeEventListener('pointerdown', close)
+      clearTimeout(blurTimeout.current)
+    }
   }, [])
 
   useEffect(() => {
     if (!open) return
+    if (searchable && window.matchMedia('(max-width: 640px)').matches) return
     const target = searchable ? ref.current.querySelector('input') : ref.current.querySelector('[aria-selected="true"], [role="option"]')
     target?.focus()
   }, [open, searchable])
 
-    if (searchable && window.matchMedia('(max-width: 640px)').matches) return
   const filtered = q ? options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : options
   const current = options.find((o) => o.value === value)
   const close = () => {
+    clearTimeout(blurTimeout.current)
     setOpen(false)
     setQ('')
     ref.current?.querySelector('.select-btn')?.focus()
@@ -43,7 +48,14 @@ export default function Select({ options, value, onChange, placeholder = 'Select
 
   return (
     <div className={`select ${className} ${open ? 'open' : ''}`} ref={ref} onKeyDown={keyDown}
-      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false) }}>
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) {
+          clearTimeout(blurTimeout.current)
+          blurTimeout.current = setTimeout(() => {
+            if (!ref.current?.contains(document.activeElement)) setOpen(false)
+          }, 0)
+        }
+      }}>
       <button type="button" className="select-btn" aria-label={`${label}: ${current?.label || placeholder}${required ? ' (required)' : ''}`}
         aria-invalid={invalid || undefined} aria-haspopup="listbox" aria-controls={open ? listId : undefined} aria-expanded={open}
         onClick={() => { setQ(''); setOpen((o) => !o) }}>
@@ -60,7 +72,6 @@ export default function Select({ options, value, onChange, placeholder = 'Select
             {filtered.map((o) => (
               <button type="button" role="option" key={o.value} aria-selected={o.value === value}
                 className={`select-item ${o.value === value ? 'active' : ''}`}
-                onPointerDown={(e) => { e.preventDefault(); onChange(o.value); close() }}
                 onClick={() => { onChange(o.value); close() }}>
                 <span>{o.node || o.label}</span>{o.value === value && <Check size={14} aria-hidden="true" />}
               </button>

@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import BalanceForm from './components/BalanceForm'
 import MerchantAdd from './components/MerchantAdd'
 import RecordsTable from './components/RecordsTable'
+import ReconPanel from './components/ReconPanel'
 import SummaryPanel from './components/SummaryPanel'
 import ChartsPanel from './components/ChartsPanel'
 import ConfirmDialog, { AccessibleDialog } from './components/ConfirmDialog'
@@ -53,14 +54,80 @@ import {
 } from 'lucide-react'
 import { changeOf, fmt, toNumber, CURRENCIES, localToday, localDay, latestWalletEntries, displayDate, setNumberLocale, setDateFormat } from './format'
 
-const OPTIONAL_COLS = ['entry_type', 'misc_expense', 'bank_amount']
+const OPTIONAL_COLS = ['entry_type', 'misc_expense', 'bank_amount', 'tags']
 const TODAY_LABEL = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
 const DEFAULT_CFG = {
   statOrder: ['wallet', 'today', 'merchants', 'entries', 'bank', 'misc'],
   statHidden: ['misc', 'entries'],
-  sectionOrder: ['charts', 'leaderboard'],
+  sectionOrder: ['charts', 'leaderboard', 'recon'],
   sectionHidden: [],
+}
+const DEFAULT_ACCOUNT_PREFERENCES = {
+  theme: 'system',
+  currency: '₹',
+  indianFmt: true,
+  dateFmt: 'dmy',
+  density: 'comfortable',
+  accent: 'indigo',
+  chargeTypes: DEFAULT_TYPES,
+  chargePresets: DEFAULT_PCTS,
+  reminder: { enabled: false, time: '21:00' },
+  dashConfig: DEFAULT_CFG,
+}
+const ACCOUNT_PREFERENCES_MIGRATION_KEY = 'accountPreferences.migratedUser.v1'
+
+function normalizeDashboardConfig(value, fallback = DEFAULT_CFG) {
+  const source = value && typeof value === 'object' ? value : {}
+  const normalizeOrder = (key, defaults) => {
+    const supplied = Array.isArray(source[key]) ? source[key] : fallback[key]
+    const allowed = new Set(defaults)
+    const order = supplied
+      .map((item) => (item === 'cashIn' ? 'bank' : item))
+      .filter((item, index, list) => allowed.has(item) && list.indexOf(item) === index)
+    return [...order, ...defaults.filter((item) => !order.includes(item))]
+  }
+  const normalizeHidden = (key, orderKey, defaultHidden) => {
+    const supplied = Array.isArray(source[key]) ? source[key] : defaultHidden
+    return [...new Set(supplied.map((item) => (item === 'cashIn' ? 'bank' : item))
+      .filter((item) => fallback[orderKey].includes(item)))]
+  }
+  return {
+    statOrder: normalizeOrder('statOrder', fallback.statOrder),
+    statHidden: normalizeHidden('statHidden', 'statOrder', fallback.statHidden),
+    sectionOrder: normalizeOrder('sectionOrder', fallback.sectionOrder),
+    sectionHidden: normalizeHidden('sectionHidden', 'sectionOrder', fallback.sectionHidden),
+  }
+}
+
+function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENCES) {
+  const source = value && typeof value === 'object' ? value : {}
+  const allowedThemes = ['system', 'light', 'dark', 'black']
+  const allowedDateFormats = ['dmy', 'mdy', 'iso']
+  const allowedDensities = ['comfortable', 'compact']
+  const allowedAccents = ACCENTS.map(({ value: accent }) => accent)
+  const validReminderTime = (time) => typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
+  const validChargeTypes = (types) => Array.isArray(types) && types.every((type) =>
+    Array.isArray(type) && typeof type[0] === 'string' && Number.isFinite(Number(type[1])))
+  const validChargePresets = (presets) => Array.isArray(presets) && presets.length > 0 &&
+    presets.every((preset) => Number.isFinite(Number(preset)))
+  const reminder = source.reminder && typeof source.reminder === 'object' ? source.reminder : {}
+
+  return {
+    theme: allowedThemes.includes(source.theme) ? source.theme : fallback.theme,
+    currency: CURRENCIES.includes(source.currency) ? source.currency : fallback.currency,
+    indianFmt: typeof source.indianFmt === 'boolean' ? source.indianFmt : fallback.indianFmt,
+    dateFmt: allowedDateFormats.includes(source.dateFmt) ? source.dateFmt : fallback.dateFmt,
+    density: allowedDensities.includes(source.density) ? source.density : fallback.density,
+    accent: allowedAccents.includes(source.accent) ? source.accent : fallback.accent,
+    chargeTypes: validChargeTypes(source.chargeTypes) ? source.chargeTypes : fallback.chargeTypes,
+    chargePresets: validChargePresets(source.chargePresets) ? source.chargePresets : fallback.chargePresets,
+    reminder: {
+      enabled: typeof reminder.enabled === 'boolean' ? reminder.enabled : fallback.reminder.enabled,
+      time: validReminderTime(reminder.time) ? reminder.time : fallback.reminder.time,
+    },
+    dashConfig: normalizeDashboardConfig(source.dashConfig, fallback.dashConfig),
+  }
 }
 const STAT_LABELS = {
   wallet: 'Total Wallet',
@@ -73,6 +140,7 @@ const STAT_LABELS = {
 const SECTION_LABELS = {
   charts: 'Charts',
   leaderboard: 'Merchant leaderboard',
+  recon: 'Reconciliation',
 }
 const ACCENTS = [
   { value: 'indigo', label: 'Indigo', swatch: 'linear-gradient(135deg,#4f46e5,#7c3aed)' },
@@ -170,7 +238,7 @@ export default function App() {
   const [walletLoading, setWalletLoading] = useState(true)
   const [walletError, setWalletError] = useState('')
   const walletRequest = useRef(0)
-  const [filters, setFilters] = useState({ merchant: '', from: '', to: '' })
+  const [filters, setFilters] = useState({ merchant: '', from: '', to: '', tag: '' })
   const [editingRow, setEditingRow] = useState(null)
   const [selectMerchant, setSelectMerchant] = useState('')
   const [status, setStatus] = useState(null)
@@ -197,6 +265,10 @@ export default function App() {
     ]))
   }, [merchantLogoPaths])
   const [authReady, setAuthReady] = useState(false)
+  const [preferencesReadyForUser, setPreferencesReadyForUser] = useState(null)
+  const [preferencesSyncUserId, setPreferencesSyncUserId] = useState(null)
+  const [preferencesMigrationUser, setPreferencesMigrationUser] = useState(null)
+  const preferencesSaveQueue = useRef(Promise.resolve())
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [dashOpen, setDashOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -227,10 +299,20 @@ export default function App() {
       observer.disconnect()
     }
   }, [])
+  const allTags = useMemo(
+    () => [...new Set(records.flatMap((r) => r.tags || []))].sort((a, b) => a.localeCompare(b)),
+    [records]
+  )
   const visibleRecords = useMemo(() => {
     const term = search.trim().toLowerCase()
-    return term ? records.filter((r) => `${r.merchant_name || ''} ${r.notes || ''} ${r.balance_date || ''}`.toLowerCase().includes(term)) : records
-  }, [records, search])
+    let rows = filters.tag ? records.filter((r) => (r.tags || []).includes(filters.tag)) : records
+    if (term) {
+      rows = rows.filter((r) =>
+        `${r.merchant_name || ''} ${r.notes || ''} ${r.balance_date || ''} ${(r.tags || []).join(' ')}`.toLowerCase().includes(term)
+      )
+    }
+    return rows
+  }, [records, search, filters.tag])
   const [dashCfg, setDashCfg] = useState(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('dashConfig.records.v1')) || {}
@@ -261,7 +343,13 @@ export default function App() {
     })
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       setSession(s)
-      if (!s) { setEntryOpen(false); setWalletOpen(false) }
+      if (!s) {
+        setEntryOpen(false)
+        setWalletOpen(false)
+        setPreferencesReadyForUser(null)
+        setPreferencesSyncUserId(null)
+        setPreferencesMigrationUser(null)
+      }
     })
     return () => sub.subscription.unsubscribe()
   }, [])
@@ -396,6 +484,162 @@ export default function App() {
       return { enabled: false, time: '21:00' }
     }
   })
+
+  const accountPreferences = useMemo(() => ({
+    theme,
+    currency,
+    indianFmt,
+    dateFmt,
+    density,
+    accent,
+    chargeTypes,
+    chargePresets,
+    reminder,
+    dashConfig: dashCfg,
+  }), [theme, currency, indianFmt, dateFmt, density, accent, chargeTypes, chargePresets, reminder, dashCfg])
+  const accountPreferencesRef = useRef(accountPreferences)
+  useEffect(() => {
+    accountPreferencesRef.current = accountPreferences
+  }, [accountPreferences])
+
+  useEffect(() => {
+    const userId = session?.user?.id
+    if (!supabase || !userId) return
+
+    let active = true
+
+    const cacheKey = `accountPreferences.v1.${userId}`
+    const readCachedPreferences = () => {
+      try {
+        const cached = localStorage.getItem(cacheKey)
+        return cached ? normalizeAccountPreferences(JSON.parse(cached)) : null
+      } catch (error) {
+        setStatus({ type: 'error', text: `Could not read saved account preferences: ${error.message}` })
+        return null
+      }
+    }
+    const applyPreferences = (preferences) => {
+      setTheme(preferences.theme)
+      setCurrency(preferences.currency)
+      setIndianFmt(preferences.indianFmt)
+      setDateFmt(preferences.dateFmt)
+      setDensity(preferences.density)
+      setAccent(preferences.accent)
+      setChargeTypes(preferences.chargeTypes)
+      setChargePresets(preferences.chargePresets)
+      setReminder(preferences.reminder)
+      setDashCfg(preferences.dashConfig)
+    }
+
+    const loadPreferences = async () => {
+      const { data, error } = await supabase
+        .from('user_preferences')
+        .select('preferences')
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (!active) return
+
+      if (error) {
+        const cached = readCachedPreferences()
+        const migratedUser = localStorage.getItem(ACCOUNT_PREFERENCES_MIGRATION_KEY)
+        const fallback = cached || (migratedUser ? DEFAULT_ACCOUNT_PREFERENCES : accountPreferencesRef.current)
+        applyPreferences(normalizeAccountPreferences(fallback))
+        setPreferencesReadyForUser(userId)
+        setPreferencesSyncUserId(null)
+        setPreferencesMigrationUser(null)
+        const migrationHint = ['42P01', 'PGRST205'].includes(error.code)
+          ? ' Run the updated supabase.sql in the Supabase SQL Editor to enable syncing.'
+          : ''
+        setStatus({
+          type: 'error',
+          text: `Account preferences could not be loaded from Supabase (${error.message}). Using this device's current preferences.${migrationHint}`,
+        })
+        return
+      }
+
+      if (data?.preferences) {
+        const preferences = normalizeAccountPreferences(data.preferences)
+        applyPreferences(preferences)
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(preferences))
+          if (!localStorage.getItem(ACCOUNT_PREFERENCES_MIGRATION_KEY)) {
+            localStorage.setItem(ACCOUNT_PREFERENCES_MIGRATION_KEY, userId)
+          }
+        } catch (cacheError) {
+          setStatus({ type: 'error', text: `Could not cache account preferences on this device: ${cacheError.message}` })
+        }
+        setPreferencesReadyForUser(userId)
+        setPreferencesSyncUserId(userId)
+        setPreferencesMigrationUser(null)
+        return
+      }
+
+      const cached = readCachedPreferences()
+      const migratedUser = localStorage.getItem(ACCOUNT_PREFERENCES_MIGRATION_KEY)
+      const shouldMigrateLegacy = !cached && !migratedUser
+      const preferences = cached || normalizeAccountPreferences(
+        shouldMigrateLegacy ? accountPreferencesRef.current : DEFAULT_ACCOUNT_PREFERENCES
+      )
+      applyPreferences(preferences)
+      setPreferencesMigrationUser(shouldMigrateLegacy ? userId : null)
+      setPreferencesReadyForUser(userId)
+      setPreferencesSyncUserId(userId)
+    }
+
+    loadPreferences().catch((error) => {
+      if (!active) return
+      const cached = readCachedPreferences()
+      applyPreferences(cached || DEFAULT_ACCOUNT_PREFERENCES)
+      setPreferencesReadyForUser(userId)
+      setPreferencesSyncUserId(null)
+      setPreferencesMigrationUser(null)
+      setStatus({ type: 'error', text: `Account preferences could not be loaded: ${error.message}` })
+    })
+
+    return () => {
+      active = false
+    }
+  }, [session?.user?.id])
+
+  useEffect(() => {
+    const userId = session?.user?.id
+    if (!userId || preferencesReadyForUser !== userId) return
+    try {
+      localStorage.setItem(`accountPreferences.v1.${userId}`, JSON.stringify(accountPreferences))
+    } catch (error) {
+      setStatus({ type: 'error', text: `Could not cache account preferences on this device: ${error.message}` })
+    }
+  }, [accountPreferences, preferencesReadyForUser, session?.user?.id])
+
+  useEffect(() => {
+    const userId = session?.user?.id
+    if (!supabase || !userId || preferencesReadyForUser !== userId || preferencesSyncUserId !== userId) return
+    const preferences = accountPreferences
+    const timeout = setTimeout(() => {
+      preferencesSaveQueue.current = preferencesSaveQueue.current
+        .then(async () => {
+          const { error } = await supabase
+            .from('user_preferences')
+            .upsert({
+              user_id: userId,
+              preferences,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'user_id' })
+          if (error) throw error
+
+          if (preferencesMigrationUser === userId) {
+            localStorage.setItem(ACCOUNT_PREFERENCES_MIGRATION_KEY, userId)
+            setPreferencesMigrationUser(null)
+          } else if (!localStorage.getItem(ACCOUNT_PREFERENCES_MIGRATION_KEY)) {
+            localStorage.setItem(ACCOUNT_PREFERENCES_MIGRATION_KEY, userId)
+          }
+        })
+        .catch((error) => {
+          setStatus({ type: 'error', text: `Account preferences could not be saved to Supabase: ${error.message}` })
+        })
+    }, 500)
+    return () => clearTimeout(timeout)
+  }, [accountPreferences, preferencesReadyForUser, preferencesSyncUserId, preferencesMigrationUser, session?.user?.id])
 
   useEffect(() => {
     localStorage.setItem('reminderSettings', JSON.stringify(reminder))
@@ -1139,6 +1383,7 @@ export default function App() {
       })),
       { group: 'Go to', label: 'New entry', run: () => newEntry() },
       { group: 'Go to', label: 'Analytics', run: () => { setAnalyticsOpen(true); go('analytics')() } },
+      { group: 'Go to', label: 'Reconciliation', run: () => { setAnalyticsOpen(true); go('recon')() } },
       { group: 'Go to', label: 'Saved balances table', run: go('records') },
       { group: 'Go to', label: 'Calculator', run: () => setCalcOpen(true) },
       { group: 'Go to', label: 'Charge calculator', run: () => setChargeOpen(true) },
@@ -1222,6 +1467,11 @@ export default function App() {
         <SummaryPanel records={visibleRecords} currency={currency} logoUrls={merchantLogoUrls} />
       </div>
     ),
+    recon: (
+      <div key="recon" id="recon">
+        <ReconPanel rows={walletRows} currency={currency} logoUrls={merchantLogoUrls} onEdit={editRecord} />
+      </div>
+    ),
     records: (
       <div key="records" id="records">
         <div className="print-header">
@@ -1239,6 +1489,7 @@ export default function App() {
           logoUrls={merchantLogoUrls}
           currency={currency}
           onFiltersChange={setFilters}
+          allTags={allTags}
           onRefresh={() => loadRecords(filters)}
           onEdit={editRecord}
           search={search}
@@ -1265,6 +1516,15 @@ export default function App() {
     )
   }
   if (supabase && !session) return <Login />
+  if (supabase && session && preferencesReadyForUser !== session.user.id) {
+    return (
+      <div className="wrap">
+        <div className="card">
+          <p>Loading your account preferences…</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="wrap" onTouchStart={onPullStart} onTouchMove={onPullMove} onTouchEnd={onPullEnd}>

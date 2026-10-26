@@ -68,6 +68,7 @@ export default function RecordsTable({
   loading,
   filters,
   merchants,
+  allTags = [],
   logoUrls = {},
   currency,
   onFiltersChange,
@@ -296,6 +297,21 @@ export default function RecordsTable({
       },
       { id: 'running', label: 'Running', hideable: true, cell: (r) => fmt(runningById[r.id], currency) },
       {
+        id: 'tags',
+        label: 'Tags',
+        hideable: true,
+        cell: (r) =>
+          (r.tags || []).length ? (
+            <span className="tag-list">
+              {r.tags.map((t) => (
+                <span key={t} className="tag-chip">{t}</span>
+              ))}
+            </span>
+          ) : (
+            ''
+          ),
+      },
+      {
         id: 'notes',
         label: 'Notes',
         hideable: true,
@@ -317,7 +333,7 @@ export default function RecordsTable({
   const COLS = visCols.length
 
   const exportCsv = () => {
-    const header = ['Date', 'Merchant', 'Type', 'Opening', 'Cash In', 'Cash Out', 'To Bank', 'Misc Exp', 'Closing', 'Change', 'Notes']
+    const header = ['Date', 'Merchant', 'Type', 'Opening', 'Cash In', 'Cash Out', 'To Bank', 'Misc Exp', 'Closing', 'Change', 'Tags', 'Notes']
     const lines = [header.map((h) => `"${h}"`).join(',')]
     for (const r of sorted) {
       lines.push(
@@ -332,6 +348,7 @@ export default function RecordsTable({
           toNumber(r.misc_expense).toFixed(2),
           toNumber(r.closing_balance).toFixed(2),
           changeOf(r).toFixed(2),
+          (r.tags || []).join('; '),
           (r.notes || '').replaceAll('"', '""'),
         ]
           .map((v) => `"${v ?? ''}"`)
@@ -569,6 +586,18 @@ export default function RecordsTable({
               To date
               <DatePicker label="To date" value={filters.to} onChange={(v) => onFiltersChange({ ...filters, to: v, preset: '' })} />
             </label>
+            {allTags.length > 0 && (
+              <label>
+                Tag
+                <Select label="Filter by tag"
+                  options={[{ value: '', label: 'All tags' }, ...allTags.map((t) => ({ value: t, label: t }))]}
+                  value={filters.tag || ''}
+                  onChange={(v) => onFiltersChange({ ...filters, tag: v })}
+                  placeholder="All tags"
+                  searchable
+                />
+              </label>
+            )}
             <div className="seg-group" role="group" aria-label="Quick date range">
               {[['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Week'], ['month', 'Month'], ['all', 'All']].map(
                 ([k, label]) => (
@@ -622,12 +651,13 @@ export default function RecordsTable({
             </div>
           </div>
 
-          {(filters.merchant || filters.from || filters.to || search.trim()) && (
+          {(filters.merchant || filters.from || filters.to || filters.tag || search.trim()) && (
             <div className="active-filters no-print" role="group" aria-label="Active filters">
               {filters.merchant && <button type="button" className="filter-chip" aria-label={`Remove merchant filter ${filters.merchant}`} onClick={() => removeFilter({ merchant: '' })}><span className="merchant-cell"><MerchantAvatar name={filters.merchant} logoUrl={logoUrls[filters.merchant]} />{filters.merchant}</span><X size={14} /></button>}
               {(filters.from || filters.to) && <button type="button" className="filter-chip" aria-label={`Remove date filter ${rangeLabel}`} onClick={() => removeFilter({ from: '', to: '', preset: '' })}>{rangeLabel}<X size={14} /></button>}
+              {filters.tag && <button type="button" className="filter-chip" aria-label={`Remove tag filter ${filters.tag}`} onClick={() => removeFilter({ tag: '' })}><span className="tag-chip">{filters.tag}</span><X size={14} /></button>}
               {search.trim() && <button type="button" className="filter-chip" aria-label="Clear search" onClick={() => removeFilter({}, true)}>Search: {search.trim()}<X size={14} /></button>}
-              <button type="button" className="secondary" onClick={() => removeFilter({ merchant: '', from: '', to: '', preset: '' }, true)}>Clear all</button>
+              <button type="button" className="secondary" onClick={() => removeFilter({ merchant: '', from: '', to: '', tag: '', preset: '' }, true)}>Clear all</button>
             </div>
           )}
           {search.trim() && <p className="search-summary">Search results for “{search.trim()}” within loaded records.</p>}
@@ -677,7 +707,7 @@ export default function RecordsTable({
                     <td colSpan={COLS} className="empty">
                       <div className="empty-state">
                         <Inbox size={30} aria-hidden="true" />
-                        <p>{search || filters.merchant || filters.from || filters.to ? 'No matching records. Try changing the search or filters.' : 'No records yet. Use New Entry to add your first balance.'}</p>
+                        <p>{search || filters.merchant || filters.from || filters.to || filters.tag ? 'No matching records. Try changing the search or filters.' : 'No records yet. Use New Entry to add your first balance.'}</p>
                       </div>
                     </td>
                   </tr>
@@ -772,6 +802,13 @@ export default function RecordsTable({
                             Close <b>{fmt(row.closing_balance, currency)}</b>
                           </span>
                         </div>
+                        {(row.tags || []).length > 0 && (
+                          <div className="tag-list">
+                            {row.tags.map((t) => (
+                              <span key={t} className="tag-chip">{t}</span>
+                            ))}
+                          </div>
+                        )}
                         {row.notes && <div className="muted">{row.notes}</div>}
                         <button type="button" className="mobile-details-button" aria-haspopup="dialog" aria-label={`Details and actions for ${row.merchant_name} on ${row.balance_date}`} onClick={() => { setSwipedId(null); setDetailRow(row) }}><MoreHorizontal size={15} /> Details / Actions</button>
                       </div>
@@ -831,6 +868,9 @@ export default function RecordsTable({
             <div key={key}><dt>{label}</dt><dd className={key === 'cash_out' && toNumber(detailRow[key]) ? 'neg' : ''}>{key === 'cash_out' && toNumber(detailRow[key]) ? `−${fmt(Math.abs(toNumber(detailRow[key])), currency)}` : fmt(detailRow[key], currency)}</dd></div>
           ))}
           <div><dt>Change</dt><dd className={changeOf(detailRow) >= 0 ? 'pos' : 'neg'}>{changeOf(detailRow) >= 0 ? '+' : '−'}{fmt(Math.abs(changeOf(detailRow)), currency)}</dd></div>
+          {(detailRow.tags || []).length > 0 && (
+            <div><dt>Tags</dt><dd><span className="tag-list">{detailRow.tags.map((t) => <span key={t} className="tag-chip">{t}</span>)}</span></dd></div>
+          )}
           <div><dt>Recorded</dt><dd>{displayDate(detailRow.created_at, true)}</dd></div>
         </dl>
         <h3>Notes</h3><p className="detail-notes">{detailRow.notes || 'No notes for this entry.'}</p>

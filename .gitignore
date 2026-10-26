@@ -13,3 +13,8 @@ dist/
 .DS_Store
 Thumbs.db
 *.log
+.vscode/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/

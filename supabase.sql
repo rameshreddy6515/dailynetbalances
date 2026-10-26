@@ -40,6 +40,12 @@ alter table public.merchants
 alter table public.merchants
   add column if not exists logo_path text;
 
+alter table public.daily_balances
+  add column if not exists tags text[] not null default '{}';
+
+create index if not exists daily_balances_tags_idx
+  on public.daily_balances using gin (tags);
+
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('merchant-logos', 'merchant-logos', true, 2097152, array['image/jpeg', 'image/png', 'image/webp'])
 on conflict (id) do update
@@ -190,3 +196,46 @@ create policy "Authenticated users delete merchant logos"
 grant select, insert, update, delete on public.user_preferences to authenticated;
 
 notify pgrst, 'reload schema';
+
+-- ============================================================
+-- SCHEDULED REPORTS (optional)
+-- Emails a daily/weekly PDF summary via the `scheduled-report`
+-- Edge Function. Requires the pg_cron + pg_net extensions and a
+-- deployed function (see supabase/functions/scheduled-report/).
+-- Replace <PROJECT_REF> and <REPORT_CRON_SECRET> before running.
+-- ============================================================
+--
+-- create extension if not exists pg_cron;
+-- create extension if not exists pg_net;
+--
+-- -- Daily report at 21:30 UTC every day
+-- select cron.schedule(
+--   'daily-balance-report',
+--   '30 21 * * *',
+--   $$
+--   select net.http_post(
+--     url := 'https://<PROJECT_REF>.supabase.co/functions/v1/scheduled-report',
+--     headers := jsonb_build_object(
+--       'Authorization', 'Bearer <REPORT_CRON_SECRET>',
+--       'Content-Type', 'application/json'
+--     ),
+--     body := jsonb_build_object('period', 'daily')
+--   );
+--   $$
+-- );
+--
+-- -- Weekly report at 21:30 UTC every Monday
+-- select cron.schedule(
+--   'weekly-balance-report',
+--   '30 21 * * 1',
+--   $$
+--   select net.http_post(
+--     url := 'https://<PROJECT_REF>.supabase.co/functions/v1/scheduled-report',
+--     headers := jsonb_build_object(
+--       'Authorization', 'Bearer <REPORT_CRON_SECRET>',
+--       'Content-Type', 'application/json'
+--     ),
+--     body := jsonb_build_object('period', 'weekly')
+--   );
+--   $$
+-- );
