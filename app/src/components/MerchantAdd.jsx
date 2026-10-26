@@ -1,13 +1,14 @@
 import { useState } from 'react'
-import { Check, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Check, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, X } from 'lucide-react'
 import MerchantAvatar from './MerchantAvatar'
 
-export default function MerchantAdd({ merchants, balances = {}, onAdd, onRename, onDelete, onSetStart }) {
+export default function MerchantAdd({ merchants, balances = {}, logoUrls = {}, onAdd, onRename, onDelete, onSetStart, onUploadLogo, onRemoveLogo }) {
   const [name, setName] = useState('')
   const [startBal, setStartBal] = useState('')
   const [renaming, setRenaming] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [startValues, setStartValues] = useState({})
+  const [uploadingLogo, setUploadingLogo] = useState(null)
 
   const submit = async () => {
     if (await onAdd(name, startBal)) {
@@ -32,6 +33,15 @@ export default function MerchantAdd({ merchants, balances = {}, onAdd, onRename,
     if (await onRename(m, renameValue)) {
       setRenaming(null)
       setRenameValue('')
+    }
+  }
+
+  const uploadLogo = async (merchant, file) => {
+    setUploadingLogo(merchant)
+    try {
+      await onUploadLogo(merchant, file)
+    } finally {
+      setUploadingLogo(null)
     }
   }
 
@@ -103,35 +113,73 @@ export default function MerchantAdd({ merchants, balances = {}, onAdd, onRename,
                   </>
                 ) : (
                   <>
-                    <span className="m-name"><MerchantAvatar name={m} />{m}</span>
-                    <span className="m-start">
-                      Start
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={startValue(m)}
-                        onChange={(e) => setStartValues((s) => ({ ...s, [m]: e.target.value }))}
-                      />
-                      <button type="button" className="small secondary" onClick={() => saveStart(m)}>
-                        <Check size={13} /> Save
-                      </button>
-                    </span>
-                    <span className="row-actions">
-                      <button
-                        type="button"
-                        className="small secondary"
-                        onClick={() => {
-                          setRenaming(m)
-                          setRenameValue(m)
-                        }}
-                      >
-                        <Pencil size={13} /> Rename
-                      </button>
-                      <button type="button" className="small danger" onClick={() => onDelete(m)}>
-                        <Trash2 size={13} /> Delete
-                      </button>
-                    </span>
+                    <div className="merchant-row-head">
+                      <span className="m-name"><MerchantAvatar name={m} logoUrl={logoUrls[m]} />{m}</span>
+                      <div className="merchant-logo-actions">
+                        <label
+                          className={`small secondary merchant-logo-upload${uploadingLogo === m ? ' is-uploading' : ''}`}
+                          aria-live="polite"
+                        >
+                          {uploadingLogo === m
+                            ? <><LoaderCircle size={15} className="merchant-logo-spinner" /> Uploading…</>
+                            : <><ImagePlus size={13} /><span className="merchant-logo-label">{logoUrls[m] ? 'Change logo' : 'Add logo'}</span></>}
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            aria-label={`${logoUrls[m] ? 'Change' : 'Add'} logo for ${m}`}
+                            disabled={uploadingLogo === m}
+                            title={`${logoUrls[m] ? 'Change' : 'Add'} logo for ${m}`}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0]
+                              if (file) uploadLogo(m, file)
+                              e.target.value = ''
+                            }}
+                          />
+                        </label>
+                        {logoUrls[m] && (
+                          <button
+                            type="button"
+                            className="small secondary merchant-logo-remove"
+                            aria-label={`Remove logo for ${m}`}
+                            title="Remove logo"
+                            disabled={uploadingLogo === m}
+                            onClick={() => onRemoveLogo(m)}
+                          >
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="merchant-row-controls">
+                      <span className="m-start">
+                        Start
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={startValue(m)}
+                          onChange={(e) => setStartValues((s) => ({ ...s, [m]: e.target.value }))}
+                        />
+                        <button type="button" className="small secondary" onClick={() => saveStart(m)}>
+                          <Check size={13} /> Save
+                        </button>
+                      </span>
+                      <span className="row-actions">
+                        <button
+                          type="button"
+                          className="small secondary"
+                          onClick={() => {
+                            setRenaming(m)
+                            setRenameValue(m)
+                          }}
+                        >
+                          <Pencil size={13} /> Rename
+                        </button>
+                        <button type="button" className="small danger" onClick={() => onDelete(m)}>
+                          <Trash2 size={13} /> Delete
+                        </button>
+                      </span>
+                    </div>
                   </>
                 )}
               </div>

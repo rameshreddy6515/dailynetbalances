@@ -204,6 +204,7 @@ export default function App() {
   const entryRef = useRef(null)
   useEffect(() => {
     const updateScrollButton = () => {
+  const [merchantLogoPaths, setMerchantLogoPaths] = useState({})
       const bottom = document.documentElement.scrollHeight - window.innerHeight
       setPageCanScroll(bottom > 240)
       setPageAtBottom(bottom > 80 && window.scrollY >= bottom - 80)
@@ -254,6 +255,13 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       setSession(s)
       if (!s) { setEntryOpen(false); setWalletOpen(false) }
+  const merchantLogoUrls = useMemo(() => {
+    if (!supabase) return {}
+    return Object.fromEntries(Object.entries(merchantLogoPaths).map(([name, path]) => [
+      name,
+      supabase.storage.from('merchant-logos').getPublicUrl(path).data.publicUrl,
+    ]))
+  }, [merchantLogoPaths])
     })
     return () => sub.subscription.unsubscribe()
   }, [])
@@ -487,7 +495,7 @@ export default function App() {
     if (!supabase || !session) return
     let { data, error } = await supabase
       .from('merchants')
-      .select('merchant_name, initial_balance')
+      .select('merchant_name, initial_balance, logo_path')
       .order('merchant_name', { ascending: true })
     if (error && (error.message || '').includes('initial_balance')) {
       ;({ data, error } = await supabase
@@ -682,16 +690,26 @@ export default function App() {
     setStatus({ type: 'success', text: `Merchant "${name}" deleted.` })
     notify(`Merchant "${name}" deleted.`, 'success', {
       label: 'Undo',
-      fn: () => restoreMerchant(name, initialBalances[name] || 0),
+      fn: () => restoreMerchant(name, initialBalances[name] || 0, logoPath),
     })
     return true
   }
 
-  const restoreMerchant = async (name, bal) => {
+  const restoreMerchant = async (name, bal, logoPath) => {
     if (!supabase) return
-    const { error } = await supabase
+    let { error } = await supabase
       .from('merchants')
-      .upsert({ merchant_name: name, initial_balance: bal }, { onConflict: 'merchant_name' })
+      .upsert({ merchant_name: name, initial_balance: bal, logo_path: logoPath || null }, { onConflict: 'merchant_name' })
+    if (error && (error.message || '').includes('logo_path')) {
+      ;({ error } = await supabase
+        .from('merchants')
+        .upsert({ merchant_name: name, initial_balance: bal }, { onConflict: 'merchant_name' }))
+    }
+    if (error && (error.message || '').includes('initial_balance')) {
+      ;({ error } = await supabase
+        .from('merchants')
+        .upsert({ merchant_name: name }, { onConflict: 'merchant_name' }))
+    }
     if (error) {
       notify(`Could not restore merchant: ${error.message}`, 'error')
       return
@@ -721,6 +739,12 @@ export default function App() {
       .eq('merchant_name', oldName)
     const { error: err2 } = await supabase
       .from('daily_balances')
+    if (error && (error.message || '').includes('logo_path')) {
+      ;({ data, error } = await supabase
+        .from('merchants')
+        .select('merchant_name, initial_balance')
+        .order('merchant_name', { ascending: true }))
+    }
       .update({ merchant_name: newName })
       .eq('merchant_name', oldName)
     const err = err1 || err2
@@ -732,10 +756,13 @@ export default function App() {
 
     setMerchants((prev) => prev.map((m) => (m === oldName ? newName : m)).sort((a, b) => a.localeCompare(b)))
     if (selectMerchant === oldName) setSelectMerchant(newName)
+      const logos = {}
     if (filters.merchant === oldName) {
       setFilters((f) => ({ ...f, merchant: newName }))
+        if (r.merchant_name && r.logo_path) logos[r.merchant_name] = r.logo_path
     } else {
       await loadRecords(filters)
+      setMerchantLogoPaths(logos)
     }
     setStatus({ type: 'success', text: `Renamed "${oldName}" to "${newName}".` })
     notify(`Renamed "${oldName}" to "${newName}".`, 'success')
@@ -877,6 +904,86 @@ export default function App() {
     if (error) {
       notify(`Restore failed: ${error.message}`, 'error')
       setRestoring(false)
+  const uploadMerchantLogo = async (name, file) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+    if (!allowedTypes.includes(file.type)) {
+      notify('Choose a JPEG, PNG, or WebP image.', 'error')
+      return false
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      notify('Logo image must be 2 MB or smaller.', 'error')
+      return false
+    }
+    if (!supabase) {
+      notify('Supabase is not configured; merchant logos cannot be uploaded.', 'error')
+      return false
+    }
+
+    const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1]
+    const newPath = `${crypto.randomUUID()}.${extension}`
+    const { error: uploadError } = await supabase.storage
+      .from('merchant-logos')
+      .upload(newPath, file, { contentType: file.type, cacheControl: '3600' })
+    if (uploadError) {
+      notify(`Could not upload merchant logo: ${uploadError.message}`, 'error')
+      return false
+    }
+
+    const { error: updateError } = await supabase
+      .from('merchants')
+      .update({ logo_path: newPath })
+      .eq('merchant_name', name)
+    if (updateError) {
+      const { error: cleanupError } = await supabase.storage.from('merchant-logos').remove([newPath])
+      const setupHint = (updateError.message || '').includes('logo_path')
+        ? ' Run the updated supabase.sql to enable merchant logos.'
+        : ''
+      const cleanupHint = cleanupError ? ` The uploaded file could not be cleaned up: ${cleanupError.message}` : ''
+      notify(`Could not save merchant logo: ${updateError.message}.${setupHint}${cleanupHint}`, 'error')
+      return false
+    }
+
+    const previousPath = merchantLogoPaths[name]
+    setMerchantLogoPaths((paths) => ({ ...paths, [name]: newPath }))
+    if (previousPath) {
+      const { error: cleanupError } = await supabase.storage.from('merchant-logos').remove([previousPath])
+      if (cleanupError) {
+        notify(`Logo updated, but the old image could not be removed: ${cleanupError.message}`, 'info')
+        return true
+      }
+    }
+    notify(`Logo updated for "${name}".`, 'success')
+    return true
+  }
+
+  const removeMerchantLogo = async (name) => {
+    const path = merchantLogoPaths[name]
+    if (!path || !supabase) return false
+    const { error } = await supabase
+      .from('merchants')
+      .update({ logo_path: null })
+      .eq('merchant_name', name)
+    if (error) {
+      const setupHint = (error.message || '').includes('logo_path')
+        ? ' Run the updated supabase.sql to enable merchant logos.'
+        : ''
+      notify(`Could not remove merchant logo: ${error.message}.${setupHint}`, 'error')
+      return false
+    }
+    setMerchantLogoPaths((paths) => {
+      const next = { ...paths }
+      delete next[name]
+      return next
+    })
+    const { error: cleanupError } = await supabase.storage.from('merchant-logos').remove([path])
+    if (cleanupError) {
+      notify(`Logo removed from "${name}", but its image could not be deleted: ${cleanupError.message}`, 'info')
+      return true
+    }
+    notify(`Logo removed from "${name}".`, 'success')
+    return true
+  }
+
       return
     }
     setStatus({ type: 'success', text: `Restored ${balances.length} records.` })
@@ -889,6 +996,7 @@ export default function App() {
 
   const resetLocal = async () => {
     const ok = await askConfirm('Clear local drafts, settings, and calculator lists? Cloud records are untouched.', {
+    const logoPath = merchantLogoPaths[name]
       confirmLabel: 'Reset',
       danger: true,
     })
@@ -906,6 +1014,11 @@ export default function App() {
     const sure = await askConfirm('This cannot be undone. Continue?', {
       confirmLabel: 'Yes, delete everything',
       danger: true,
+    })
+    setMerchantLogoPaths((paths) => {
+      const next = { ...paths }
+      delete next[name]
+      return next
     })
     if (!sure || !supabase) return
     const { error } = await supabase.from('daily_balances').delete().not('id', 'is', null)
@@ -963,6 +1076,12 @@ export default function App() {
     const entries = latestWalletEntries(walletRows)
     const todayStr = localToday()
     const yesterdayStr = localDay(-1)
+    setMerchantLogoPaths((paths) => {
+      if (!paths[oldName]) return paths
+      const next = { ...paths, [newName]: paths[oldName] }
+      delete next[oldName]
+      return next
+    })
     const todayChange = walletRows.reduce((total, row) => total + (row.balance_date === todayStr ? changeOf(row) : 0), 0)
     const yesterdayChange = walletRows.reduce((total, row) => total + (row.balance_date === yesterdayStr ? changeOf(row) : 0), 0)
     const hasYesterday = walletRows.some((r) => r.balance_date === yesterdayStr)
@@ -1100,7 +1219,7 @@ export default function App() {
     ),
     leaderboard: (
       <div key="leaderboard" id="leaderboard">
-        <SummaryPanel records={visibleRecords} currency={currency} />
+        <SummaryPanel records={visibleRecords} currency={currency} logoUrls={merchantLogoUrls} />
       </div>
     ),
     records: (
@@ -1300,7 +1419,7 @@ export default function App() {
             {wallet.entries.map((row, i) => (
               <li key={row.merchant_name} style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
                 <div className="wallet-item">
-                  <MerchantAvatar name={row.merchant_name} />
+                  <MerchantAvatar name={row.merchant_name} logoUrl={merchantLogoUrls[row.merchant_name]} />
                   <div><strong>{row.merchant_name}</strong>
                     {row.balance_date !== todayStr && <span className="stale-badge">Not updated today</span>}
                     <span>Balance date: {displayDate(row.balance_date)}</span>
@@ -1339,7 +1458,7 @@ export default function App() {
                   return (
                     <li key={m} style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
                       <div className="wallet-item">
-                        <MerchantAvatar name={m} />
+                        <MerchantAvatar name={m} logoUrl={merchantLogoUrls[m]} />
                         <div><strong>{m}</strong>
                           <span>{last ? `Last closing: ${fmt(last.closing_balance, currency)} · ${displayDate(last.balance_date)}` : 'No records yet'}</span>
                         </div>
@@ -1349,6 +1468,7 @@ export default function App() {
                       </button>
                     </li>
                   )
+          logoUrls={merchantLogoUrls}
                 })}
               </ul>
             </>
@@ -1391,7 +1511,7 @@ export default function App() {
             {bankMoves.map((row, i) => (
               <li key={row.id} style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
                 <div className="wallet-item">
-                  <MerchantAvatar name={row.merchant_name} />
+                  <MerchantAvatar name={row.merchant_name} logoUrl={merchantLogoUrls[row.merchant_name]} />
                   <div><strong>{row.merchant_name}</strong>
                     <span>Date: {displayDate(row.balance_date)}</span>
                     {row.notes && <span>{row.notes}</span>}
@@ -1414,7 +1534,7 @@ export default function App() {
       )}
 
       {showMerchants && (
-        <AccessibleDialog title="Merchant Settings" onClose={() => setShowMerchants(false)}>
+        <AccessibleDialog title="Merchant Settings" className="merchant-settings-dialog" onClose={() => setShowMerchants(false)}>
             <MerchantAdd
               merchants={merchants}
               balances={initialBalances}
@@ -1454,7 +1574,7 @@ export default function App() {
             <div><h2 id="entry-title">{editingRow ? 'Edit entry' : copySource ? 'Copy entry' : 'New entry'}</h2><p id="entry-description">Record the actual closing balance for this merchant.</p></div>
             <button type="button" className="secondary icon-button" aria-label="Close entry panel" disabled={entryBusy} onClick={closeEntry}><X size={20} /></button>
           </div>
-          <BalanceForm key={entryKey} merchants={merchants} initialBalances={initialBalances} editingRow={editingRow}
+          <BalanceForm key={entryKey} merchants={merchants} initialBalances={initialBalances} logoUrls={merchantLogoUrls} editingRow={editingRow}
             selectMerchant={selectMerchant} copySource={copySource} currency={currency}
             onSubmit={saveRecord} onConfirm={askConfirm} onCancelEdit={() => setEditingRow(null)}
             onClose={closeEntry} onBusyChange={setEntryBusy} />
@@ -1618,3 +1738,6 @@ export default function App() {
     </div>
   )
 }
+              logoUrls={merchantLogoUrls}
+              onUploadLogo={uploadMerchantLogo}
+              onRemoveLogo={removeMerchantLogo}

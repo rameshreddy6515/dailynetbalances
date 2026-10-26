@@ -68,6 +68,7 @@ export default function RecordsTable({
   loading,
   filters,
   merchants,
+  logoUrls = {},
   currency,
   onFiltersChange,
   onRefresh,
@@ -241,7 +242,7 @@ export default function RecordsTable({
 
   const columns = [
       { id: 'date', label: 'Date', sort: 'date', cell: (r) => r.balance_date },
-      { id: 'merchant', label: 'Merchant', sort: 'merchant', cell: (r) => <span className="merchant-cell"><MerchantAvatar name={r.merchant_name} />{r.merchant_name}</span> },
+      { id: 'merchant', label: 'Merchant', sort: 'merchant', cell: (r) => <span className="merchant-cell"><MerchantAvatar name={r.merchant_name} logoUrl={logoUrls[r.merchant_name]} />{r.merchant_name}</span> },
       {
         id: 'type',
         label: 'Type',
@@ -553,7 +554,7 @@ export default function RecordsTable({
             <label>
               Merchant
               <Select label="Filter by merchant"
-                options={[{ value: '', label: 'All merchants' }, ...merchants.map((m) => ({ value: m, label: m, node: <span className="merchant-cell"><MerchantAvatar name={m} />{m}</span> }))]}
+                options={[{ value: '', label: 'All merchants' }, ...merchants.map((m) => ({ value: m, label: m, node: <span className="merchant-cell"><MerchantAvatar name={m} logoUrl={logoUrls[m]} />{m}</span> }))]}
                 value={filters.merchant}
                 onChange={(v) => onFiltersChange({ ...filters, merchant: v })}
                 placeholder="All merchants"
@@ -623,7 +624,7 @@ export default function RecordsTable({
 
           {(filters.merchant || filters.from || filters.to || search.trim()) && (
             <div className="active-filters no-print" role="group" aria-label="Active filters">
-              {filters.merchant && <button type="button" className="filter-chip" aria-label={`Remove merchant filter ${filters.merchant}`} onClick={() => removeFilter({ merchant: '' })}><span className="merchant-cell"><MerchantAvatar name={filters.merchant} />{filters.merchant}</span><X size={14} /></button>}
+              {filters.merchant && <button type="button" className="filter-chip" aria-label={`Remove merchant filter ${filters.merchant}`} onClick={() => removeFilter({ merchant: '' })}><span className="merchant-cell"><MerchantAvatar name={filters.merchant} logoUrl={logoUrls[filters.merchant]} />{filters.merchant}</span><X size={14} /></button>}
               {(filters.from || filters.to) && <button type="button" className="filter-chip" aria-label={`Remove date filter ${rangeLabel}`} onClick={() => removeFilter({ from: '', to: '', preset: '' })}>{rangeLabel}<X size={14} /></button>}
               {search.trim() && <button type="button" className="filter-chip" aria-label="Clear search" onClick={() => removeFilter({}, true)}>Search: {search.trim()}<X size={14} /></button>}
               <button type="button" className="secondary" onClick={() => removeFilter({ merchant: '', from: '', to: '', preset: '' }, true)}>Clear all</button>
@@ -753,7 +754,7 @@ export default function RecordsTable({
                         }}
                       >
                         <div className="rc-head">
-                          <span className="merchant-cell"><MerchantAvatar name={row.merchant_name} /><b>{row.merchant_name}</b></span>
+                          <span className="merchant-cell"><MerchantAvatar name={row.merchant_name} logoUrl={logoUrls[row.merchant_name]} /><b>{row.merchant_name}</b></span>
                             <b className={`rc-change ${change >= 0 ? 'pos' : 'neg'}`} aria-label={`Net change ${change >= 0 ? 'increase' : 'decrease'} ${fmt(Math.abs(change), currency)}`}>
                             {change >= 0 ? '+' : '−'}
                             {fmt(Math.abs(change), currency)}
@@ -816,7 +817,7 @@ export default function RecordsTable({
           </div>
       </>
       {detailRow && <AccessibleDialog title="Record details" className="m-sheet" onClose={() => setDetailRow(null)}>
-        <p><span className="merchant-cell"><MerchantAvatar name={detailRow.merchant_name} /><strong>{detailRow.merchant_name}</strong></span> · {displayDate(detailRow.balance_date)}</p>
+        <p><span className="merchant-cell"><MerchantAvatar name={detailRow.merchant_name} logoUrl={logoUrls[detailRow.merchant_name]} /><strong>{detailRow.merchant_name}</strong></span> · {displayDate(detailRow.balance_date)}</p>
         <dl className="record-detail-list">
           <div><dt>Entry type</dt><dd>{TYPE_LABELS[detailRow.entry_type] || 'Daily'}</dd></div>
           {[

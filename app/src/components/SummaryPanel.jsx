@@ -24,7 +24,7 @@ const Spark = ({ data }) => {
   )
 }
 
-export default function SummaryPanel({ records, currency }) {
+export default function SummaryPanel({ records, currency, logoUrls = {} }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sec.leaderboard') === '1')
 
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function SummaryPanel({ records, currency }) {
           <div className="summary-card" key={s.name}>
             <div className="name">
               <span className={`rank rank-${i + 1 <= 3 ? i + 1 : 'n'}`}>{i + 1}</span>
-              <span className="merchant-cell"><MerchantAvatar name={s.name} />{s.name}</span>
+              <span className="merchant-cell"><MerchantAvatar name={s.name} logoUrl={logoUrls[s.name]} />{s.name}</span>
             </div>
             <Spark data={trends[s.name]} />
             <div className="row">

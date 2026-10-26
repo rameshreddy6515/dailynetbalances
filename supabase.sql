@@ -19,6 +19,12 @@ create table if not exists public.daily_balances (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.user_preferences (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  preferences jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 alter table public.daily_balances
   add column if not exists misc_expense numeric(12,2) not null default 0;
 
@@ -31,6 +37,16 @@ alter table public.daily_balances
 alter table public.merchants
   add column if not exists initial_balance numeric(12,2) not null default 0;
 
+alter table public.merchants
+  add column if not exists logo_path text;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('merchant-logos', 'merchant-logos', true, 2097152, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
 insert into public.merchants (merchant_name)
 select distinct merchant_name
 from public.daily_balances
@@ -42,6 +58,7 @@ create index if not exists daily_balances_merchant_date_idx
 
 alter table public.merchants enable row level security;
 alter table public.daily_balances enable row level security;
+alter table public.user_preferences enable row level security;
 
 drop policy if exists "Allow merchant insert for everyone" on public.merchants;
 create policy "Allow merchant insert for everyone"
@@ -140,3 +157,36 @@ create policy "Auth update balances"
 drop policy if exists "Auth delete balances" on public.daily_balances;
 create policy "Auth delete balances"
   on public.daily_balances for delete to authenticated using (true);
+
+drop policy if exists "Users manage own preferences" on public.user_preferences;
+create policy "Users manage own preferences"
+  on public.user_preferences
+  for all
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Authenticated users read merchant logos" on storage.objects;
+create policy "Authenticated users read merchant logos"
+  on storage.objects for select to authenticated
+  using (bucket_id = 'merchant-logos');
+
+drop policy if exists "Authenticated users upload merchant logos" on storage.objects;
+create policy "Authenticated users upload merchant logos"
+  on storage.objects for insert to authenticated
+  with check (bucket_id = 'merchant-logos');
+
+drop policy if exists "Authenticated users update merchant logos" on storage.objects;
+create policy "Authenticated users update merchant logos"
+  on storage.objects for update to authenticated
+  using (bucket_id = 'merchant-logos')
+  with check (bucket_id = 'merchant-logos');
+
+drop policy if exists "Authenticated users delete merchant logos" on storage.objects;
+create policy "Authenticated users delete merchant logos"
+  on storage.objects for delete to authenticated
+  using (bucket_id = 'merchant-logos');
+
+grant select, insert, update, delete on public.user_preferences to authenticated;
+
+notify pgrst, 'reload schema';

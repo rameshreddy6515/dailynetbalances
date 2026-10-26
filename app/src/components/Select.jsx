@@ -21,6 +21,7 @@ export default function Select({ options, value, onChange, placeholder = 'Select
     target?.focus()
   }, [open, searchable])
 
+    if (searchable && window.matchMedia('(max-width: 640px)').matches) return
   const filtered = q ? options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : options
   const current = options.find((o) => o.value === value)
   const close = () => {

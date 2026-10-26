@@ -43,7 +43,7 @@ const NumInput = ({ value, onChange, required }) => (
   />
 )
 
-export default function BalanceForm({ merchants, initialBalances, editingRow, selectMerchant, copySource, currency, onSubmit, onConfirm, onCancelEdit, onClose, onBusyChange }) {
+export default function BalanceForm({ merchants, initialBalances, logoUrls = {}, editingRow, selectMerchant, copySource, currency, onSubmit, onConfirm, onCancelEdit, onClose, onBusyChange }) {
   const [form, setForm] = useState(loadDraft)
   const [openingSource, setOpeningSource] = useState(null)
   const [closingAuto, setClosingAuto] = useState(false)
@@ -250,7 +250,7 @@ export default function BalanceForm({ merchants, initialBalances, editingRow, se
           Merchant name
           <Select label="Merchant name" className="merchant-select" required invalid={!!validation && !form.merchant}
             options={[
-              ...merchants.map((m) => ({ value: m, label: m, node: <span className="merchant-cell"><MerchantAvatar name={m} />{m}</span> })),
+              ...merchants.map((m) => ({ value: m, label: m, node: <span className="merchant-cell"><MerchantAvatar name={m} logoUrl={logoUrls[m]} />{m}</span> })),
               ...(form.merchant && !merchants.includes(form.merchant)
                 ? [{ value: form.merchant, label: form.merchant }]
                 : []),
