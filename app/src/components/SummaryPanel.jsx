@@ -73,6 +73,50 @@ export default function SummaryPanel({ records, currency, logoUrls = {} }) {
     return byM
   }, [records])
 
+  const recurringPatterns = useMemo(() => {
+    const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const byMerchant = {}
+    const sorted = [...records].sort((a, b) =>
+      `${a.balance_date}|${a.created_at || ''}`.localeCompare(`${b.balance_date}|${b.created_at || ''}`)
+    )
+    for (const r of sorted) {
+      const m = r.merchant_name || 'Unknown'
+      const d = new Date(`${r.balance_date}T00:00:00`)
+      if (Number.isNaN(d.getTime())) continue
+      const slot = (byMerchant[m] ||= { count: 0, total: 0, weekdays: Array.from({ length: 7 }, () => ({ sum: 0, count: 0 })) })
+      const change = changeOf(r)
+      slot.count += 1
+      slot.total += change
+      slot.weekdays[d.getDay()].sum += change
+      slot.weekdays[d.getDay()].count += 1
+    }
+
+    return Object.entries(byMerchant)
+      .map(([name, data]) => {
+        const observed = data.weekdays
+          .map((entry, idx) => ({ day: weekdayNames[idx], avg: entry.count ? entry.sum / entry.count : null, count: entry.count }))
+          .filter((entry) => entry.avg !== null)
+        if (observed.length < 2 || data.count < 4) return null
+        const strongest = observed.reduce((best, cur) => (Math.abs(cur.avg) > Math.abs(best.avg) ? cur : best))
+        const positive = observed.reduce((best, cur) => (cur.avg > best.avg ? cur : best))
+        const negative = observed.reduce((best, cur) => (cur.avg < best.avg ? cur : best))
+        const spread = positive.avg - negative.avg
+        if (Math.abs(spread) < 0.01 && data.count < 6) return null
+        return {
+          name,
+          count: data.count,
+          avg: data.total / data.count,
+          positive,
+          negative,
+          spread,
+          strongest,
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => Math.abs(b.spread) - Math.abs(a.spread))
+      .slice(0, 3)
+  }, [records])
+
   if (!summary.length) return null
 
   return (
@@ -92,37 +136,73 @@ export default function SummaryPanel({ records, currency, logoUrls = {} }) {
       <div className={`collapse${collapsed ? ' closed' : ''}`}>
         <div className="collapse-inner">
       {!collapsed && (
-      <div className="summary-grid no-print">
-        {summary.map((s, i) => (
-          <div className="summary-card" key={s.name}>
-            <div className="name">
-              <span className={`rank rank-${i + 1 <= 3 ? i + 1 : 'n'}`}>{i + 1}</span>
-              <span className="merchant-cell"><MerchantAvatar name={s.name} logoUrl={logoUrls[s.name]} />{s.name}</span>
-            </div>
-            <Spark data={trends[s.name]} />
-            <div className="row">
-              <span>Entries</span>
-              <b>{s.count}</b>
-            </div>
-            <div className="row">
-              <span>Moved to Bank</span>
-              <b>{money(s.bank, currency)}</b>
-            </div>
-            <div className="row">
-              <span>Total Misc Exp</span>
-              <b>{money(s.misc, currency)}</b>
-            </div>
-            <div className="row">
-              <span>Total Change</span>
-              <b className={s.change >= 0 ? 'pos' : 'neg'}>{money(s.change, currency)}</b>
-            </div>
-            <div className="row">
-              <span>Last Balance</span>
-              <b>{money(s.lastBalance, currency)}</b>
-            </div>
+        <>
+          <div className="summary-grid no-print">
+            {summary.map((s, i) => (
+              <div className="summary-card" key={s.name}>
+                <div className="name">
+                  <span className={`rank rank-${i + 1 <= 3 ? i + 1 : 'n'}`}>{i + 1}</span>
+                  <span className="merchant-cell"><MerchantAvatar name={s.name} logoUrl={logoUrls[s.name]} />{s.name}</span>
+                </div>
+                <Spark data={trends[s.name]} />
+                <div className="row">
+                  <span>Entries</span>
+                  <b>{s.count}</b>
+                </div>
+                <div className="row">
+                  <span>Moved to Bank</span>
+                  <b>{money(s.bank, currency)}</b>
+                </div>
+                <div className="row">
+                  <span>Total Misc Exp</span>
+                  <b>{money(s.misc, currency)}</b>
+                </div>
+                <div className="row">
+                  <span>Total Change</span>
+                  <b className={s.change >= 0 ? 'pos' : 'neg'}>{money(s.change, currency)}</b>
+                </div>
+                <div className="row">
+                  <span>Last Balance</span>
+                  <b>{money(s.lastBalance, currency)}</b>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+          {recurringPatterns.length > 0 && (
+            <div className="pattern-grid no-print">
+              <div className="pattern-head">
+                <h3>Recurring patterns</h3>
+                <span className="chart-sub">weekday tendency by merchant</span>
+              </div>
+              <div className="pattern-cards">
+                {recurringPatterns.map((pattern) => (
+                  <div className="pattern-card" key={pattern.name}>
+                    <div className="pattern-top">
+                      <span className="merchant-cell"><MerchantAvatar name={pattern.name} logoUrl={logoUrls[pattern.name]} />{pattern.name}</span>
+                      <span className="pattern-pill">{pattern.count} entries</span>
+                    </div>
+                    <div className="pattern-row">
+                      <span>Strongest swing</span>
+                      <b className={pattern.strongest.avg >= 0 ? 'pos' : 'neg'}>{pattern.strongest.day} · {money(pattern.strongest.avg, currency)}</b>
+                    </div>
+                    <div className="pattern-row">
+                      <span>Best weekday</span>
+                      <b className="pos">{pattern.positive.day} · {money(pattern.positive.avg, currency)}</b>
+                    </div>
+                    <div className="pattern-row">
+                      <span>Weakest weekday</span>
+                      <b className="neg">{pattern.negative.day} · {money(pattern.negative.avg, currency)}</b>
+                    </div>
+                    <div className="pattern-row">
+                      <span>Spread</span>
+                      <b>{money(pattern.spread, currency)}</b>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
         </div>
       </div>

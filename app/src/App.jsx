@@ -73,6 +73,7 @@ const DEFAULT_ACCOUNT_PREFERENCES = {
   chargeTypes: DEFAULT_TYPES,
   chargePresets: DEFAULT_PCTS,
   reminder: { enabled: false, time: '21:00' },
+  visualPreset: 'custom',
   dashConfig: DEFAULT_CFG,
 }
 const ACCOUNT_PREFERENCES_MIGRATION_KEY = 'accountPreferences.migratedUser.v1'
@@ -106,6 +107,7 @@ function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENC
   const allowedDateFormats = ['dmy', 'mdy', 'iso']
   const allowedDensities = ['comfortable', 'compact']
   const allowedAccents = ACCENTS.map(({ value: accent }) => accent)
+  const allowedPresets = VISUAL_PRESETS.map(({ value }) => value)
   const validReminderTime = (time) => typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
   const validChargeTypes = (types) => Array.isArray(types) && types.every((type) =>
     Array.isArray(type) && typeof type[0] === 'string' && Number.isFinite(Number(type[1])))
@@ -126,6 +128,9 @@ function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENC
       enabled: typeof reminder.enabled === 'boolean' ? reminder.enabled : fallback.reminder.enabled,
       time: validReminderTime(reminder.time) ? reminder.time : fallback.reminder.time,
     },
+    visualPreset: allowedPresets.includes(source.visualPreset)
+      ? source.visualPreset
+      : resolveVisualPreset(source.theme ?? fallback.theme, source.accent ?? fallback.accent),
     dashConfig: normalizeDashboardConfig(source.dashConfig, fallback.dashConfig),
   }
 }
@@ -154,6 +159,18 @@ const ACCENTS = [
   { value: 'amber', label: 'Amber', swatch: 'linear-gradient(135deg,#f59e0b,#d97706)' },
   { value: 'lime', label: 'Lime', swatch: 'linear-gradient(135deg,#84cc16,#65a30d)' },
 ]
+const VISUAL_PRESETS = [
+  { value: 'custom', label: 'Custom', theme: 'system', accent: 'indigo', note: 'Manual theme and accent', swatch: 'linear-gradient(135deg,#64748b,#94a3b8)' },
+  { value: 'aurora', label: 'Aurora Glow', theme: 'dark', accent: 'violet', note: 'Cool violet glass', swatch: 'linear-gradient(135deg,#8b5cf6,#ec4899)' },
+  { value: 'midnight', label: 'Midnight Noir', theme: 'black', accent: 'slate', note: 'Deep monochrome glass', swatch: 'linear-gradient(135deg,#0f172a,#475569)' },
+  { value: 'glass', label: 'Glass Blue', theme: 'dark', accent: 'ocean', note: 'Bright blue glass', swatch: 'linear-gradient(135deg,#0ea5e9,#2563eb)' },
+  { value: 'sunlit', label: 'Sunlit Soft', theme: 'light', accent: 'indigo', note: 'Bright airy workspace', swatch: 'linear-gradient(135deg,#f59e0b,#fbbf24)' },
+  { value: 'ember', label: 'Amber Ember', theme: 'dark', accent: 'amber', note: 'Warm cinematic glow', swatch: 'linear-gradient(135deg,#f97316,#ef4444)' },
+]
+const resolveVisualPreset = (themeValue, accentValue) => VISUAL_PRESETS.find(
+  (preset) => preset.value !== 'custom' && preset.theme === themeValue && preset.accent === accentValue,
+)?.value || 'custom'
+const getVisualPreset = (value) => VISUAL_PRESETS.find((preset) => preset.value === value) || VISUAL_PRESETS[0]
 
 function ToastItem({ t, onClose, onAction }) {
   const [paused, setPaused] = useState(false)
@@ -252,6 +269,11 @@ export default function App() {
     return v
   })
   const [accent, setAccent] = useState(() => localStorage.getItem('accent') || 'indigo')
+  const [visualPreset, setVisualPreset] = useState(() => {
+    const stored = localStorage.getItem('visualPreset')
+    if (stored && VISUAL_PRESETS.some((preset) => preset.value === stored)) return stored
+    return resolveVisualPreset(localStorage.getItem('theme') || 'system', localStorage.getItem('accent') || 'indigo')
+  })
   const [copySource, setCopySource] = useState(null)
   const [toasts, setToasts] = useState([])
   const [confirmState, setConfirmState] = useState(null)
@@ -281,24 +303,16 @@ export default function App() {
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
   const [flashId, setFlashId] = useState(null)
   const [search, setSearch] = useState('')
+  const [navActive, setNavActive] = useState('records')
+  const [sectionActive, setSectionActive] = useState('records')
+  const searchInputRef = useRef(null)
   const entryRef = useRef(null)
   useEffect(() => {
-    const updateScrollButton = () => {
-      const bottom = document.documentElement.scrollHeight - window.innerHeight
-      setPageCanScroll(bottom > 240)
-      setPageAtBottom(bottom > 80 && window.scrollY >= bottom - 80)
-    }
-    updateScrollButton()
-    window.addEventListener('scroll', updateScrollButton, { passive: true })
-    window.addEventListener('resize', updateScrollButton)
-    const observer = new ResizeObserver(updateScrollButton)
-    observer.observe(document.documentElement)
-    return () => {
-      window.removeEventListener('scroll', updateScrollButton)
-      window.removeEventListener('resize', updateScrollButton)
-      observer.disconnect()
-    }
-  }, [])
+    if (entryOpen) setNavActive('new')
+    else if (showMerchants) setNavActive('merchants')
+    else if (calcOpen) setNavActive('calc')
+    else setNavActive('records')
+  }, [entryOpen, showMerchants, calcOpen])
   const allTags = useMemo(
     () => [...new Set(records.flatMap((r) => r.tags || []))].sort((a, b) => a.localeCompare(b)),
     [records]
@@ -313,6 +327,22 @@ export default function App() {
     }
     return rows
   }, [records, search, filters.tag])
+  useEffect(() => {
+    const ids = ['records', 'charts', 'leaderboard', 'recon']
+    const nodes = ids.map((id) => document.getElementById(id)).filter(Boolean)
+    if (!nodes.length) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting)
+        if (!visible.length) return
+        const best = visible.sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+        if (best?.target?.id) setSectionActive(best.target.id)
+      },
+      { threshold: [0.18, 0.32, 0.48, 0.64] }
+    )
+    nodes.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }, [loading, visibleRecords.length, analyticsOpen])
   const [dashCfg, setDashCfg] = useState(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('dashConfig.records.v1')) || {}
@@ -352,18 +382,6 @@ export default function App() {
       }
     })
     return () => sub.subscription.unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    const h = (e) => {
-      if (document.querySelector('dialog[open]')) return
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setPaletteOpen((o) => !o)
-      }
-    }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
   }, [])
 
   useEffect(() => {
@@ -495,8 +513,9 @@ export default function App() {
     chargeTypes,
     chargePresets,
     reminder,
+    visualPreset,
     dashConfig: dashCfg,
-  }), [theme, currency, indianFmt, dateFmt, density, accent, chargeTypes, chargePresets, reminder, dashCfg])
+  }), [theme, currency, indianFmt, dateFmt, density, accent, visualPreset, chargeTypes, chargePresets, reminder, dashCfg])
   const accountPreferencesRef = useRef(accountPreferences)
   useEffect(() => {
     accountPreferencesRef.current = accountPreferences
@@ -528,6 +547,7 @@ export default function App() {
       setChargeTypes(preferences.chargeTypes)
       setChargePresets(preferences.chargePresets)
       setReminder(preferences.reminder)
+      setVisualPreset(preferences.visualPreset)
       setDashCfg(preferences.dashConfig)
     }
 
@@ -712,12 +732,35 @@ export default function App() {
   }, [])
 
   const dark = theme === 'dark' || theme === 'black' || (theme === 'system' && sysDark)
+  const applyTheme = (nextTheme) => {
+    setTheme(nextTheme)
+    setVisualPreset(resolveVisualPreset(nextTheme, accent))
+  }
+  const applyAccent = (nextAccent) => {
+    setAccent(nextAccent)
+    setVisualPreset(resolveVisualPreset(theme, nextAccent))
+  }
+  const applyVisualPreset = (presetValue) => {
+    const preset = getVisualPreset(presetValue)
+    if (preset.value === 'custom') {
+      setVisualPreset('custom')
+      return
+    }
+    setTheme(preset.theme)
+    setAccent(preset.accent)
+    setVisualPreset(preset.value)
+  }
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : ''
     document.documentElement.dataset.oled = theme === 'black' ? '1' : ''
     localStorage.setItem('theme', theme)
   }, [dark, theme])
+
+  useEffect(() => {
+    document.documentElement.dataset.preset = visualPreset === 'custom' ? '' : visualPreset
+    localStorage.setItem('visualPreset', visualPreset)
+  }, [visualPreset])
 
   useEffect(() => {
     setNumberLocale(indianFmt ? 'en-IN' : 'en-US')
@@ -827,6 +870,80 @@ export default function App() {
       if (request === walletRequest.current) setWalletLoading(false)
     }
   }, [session])
+
+  useEffect(() => {
+    const updateScrollButton = () => {
+      const bottom = document.documentElement.scrollHeight - window.innerHeight
+      setPageCanScroll(bottom > 240)
+      setPageAtBottom(bottom > 80 && window.scrollY >= bottom - 80)
+    }
+    updateScrollButton()
+    window.addEventListener('scroll', updateScrollButton, { passive: true })
+    window.addEventListener('resize', updateScrollButton)
+    const observer = new ResizeObserver(updateScrollButton)
+    observer.observe(document.documentElement)
+    return () => {
+      window.removeEventListener('scroll', updateScrollButton)
+      window.removeEventListener('resize', updateScrollButton)
+      observer.disconnect()
+    }
+  }, [])
+  useEffect(() => {
+    const isEditable = (target) =>
+      target instanceof HTMLElement && (
+        target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+      )
+    const h = (e) => {
+      const key = e.key.toLowerCase()
+      if ((e.ctrlKey || e.metaKey) && key === 'k') {
+        e.preventDefault()
+        setPaletteOpen((o) => !o)
+        return
+      }
+      if (document.querySelector('dialog[open]') || isEditable(e.target)) return
+      const mod = e.ctrlKey || e.metaKey
+      if (!mod || !e.altKey) return
+      if (key === 'n') {
+        e.preventDefault()
+        if (!entryBusy) {
+          setEntryKey((k) => k + 1)
+          setEditingRow(null)
+          setCopySource(null)
+          setSelectMerchant('')
+          setEntryOpen(true)
+        }
+        return
+      }
+      if (key === 'f') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select?.()
+        return
+      }
+      if (key === 'r') {
+        e.preventDefault()
+        loadRecords(filters)
+        return
+      }
+      if (key === 'a') {
+        e.preventDefault()
+        setAnalyticsOpen(true)
+        requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('charts')?.scrollIntoView({ behavior: 'smooth' })))
+        return
+      }
+      if (key === 'm') {
+        e.preventDefault()
+        setShowMerchants(true)
+        return
+      }
+      if (key === 'c') {
+        e.preventDefault()
+        setCalcOpen(true)
+      }
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [entryBusy, filters, loadRecords])
 
   useEffect(() => {
     loadMerchants()
@@ -1355,7 +1472,25 @@ export default function App() {
     [visibleRecords, merchants]
   )
 
-  const go = (id) => () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+  const sectionIds = new Set(['records', 'charts', 'leaderboard', 'recon'])
+  const navIds = new Set(['records', 'new', 'merchants', 'calc'])
+  const go = (id) => () => {
+    const scrollTo = (target) => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth' })
+    if (id === 'analytics') {
+      setAnalyticsOpen(true)
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollTo('analytics')))
+      return
+    }
+    if (id === 'charts' || id === 'leaderboard' || id === 'recon') {
+      setAnalyticsOpen(true)
+      setSectionActive(id)
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollTo(id)))
+      return
+    }
+    if (sectionIds.has(id)) setSectionActive(id)
+    if (navIds.has(id)) setNavActive(id)
+    scrollTo(id)
+  }
 
   const pullRef = useRef({ active: false, y: 0 })
   const [pullDist, setPullDist] = useState(0)
@@ -1385,11 +1520,13 @@ export default function App() {
       { group: 'Go to', label: 'Analytics', run: () => { setAnalyticsOpen(true); go('analytics')() } },
       { group: 'Go to', label: 'Reconciliation', run: () => { setAnalyticsOpen(true); go('recon')() } },
       { group: 'Go to', label: 'Saved balances table', run: go('records') },
+      { group: 'Go to', label: 'Focus search', run: () => searchInputRef.current?.focus() },
+      { group: 'Go to', label: 'Open analytics', run: () => { setAnalyticsOpen(true); go('charts')() } },
       { group: 'Go to', label: 'Calculator', run: () => setCalcOpen(true) },
       { group: 'Go to', label: 'Charge calculator', run: () => setChargeOpen(true) },
       { group: 'Action', label: 'Refresh records', run: () => loadRecords(filters) },
       { group: 'Action', label: 'Customize dashboard', run: () => setDashOpen(true) },
-      { group: 'Action', label: 'Toggle dark mode', run: () => setTheme(dark ? 'light' : 'dark') },
+      { group: 'Action', label: 'Toggle dark mode', run: () => applyTheme(dark ? 'light' : 'dark') },
       { group: 'Action', label: 'Print records', run: () => window.print() },
       ...(session && supabase
         ? [{ group: 'Action', label: 'Sign out', run: () => supabase.auth.signOut() }]
@@ -1551,6 +1688,20 @@ export default function App() {
               <p className="brand-sub">{brandLine}</p>
             )}
           </div>
+          <div className="page-nav no-print" role="navigation" aria-label="Page sections">
+            <button type="button" className={sectionActive === 'records' ? 'active' : ''} onClick={go('records')} aria-label="Go to saved balances">
+              Records
+            </button>
+            <button type="button" className={sectionActive === 'charts' ? 'active' : ''} onClick={go('charts')} aria-label="Go to charts">
+              Charts
+            </button>
+            <button type="button" className={sectionActive === 'leaderboard' ? 'active' : ''} onClick={go('leaderboard')} aria-label="Go to summary">
+              Summary
+            </button>
+            <button type="button" className={sectionActive === 'recon' ? 'active' : ''} onClick={go('recon')} aria-label="Go to reconciliation">
+              Recon
+            </button>
+          </div>
           <div className="header-controls">
           <div className="actions header-primary">
             {session && (
@@ -1577,7 +1728,7 @@ export default function App() {
             <button
               type="button"
               className="secondary small icon-button"
-              onClick={() => setTheme(dark ? 'light' : 'dark')}
+              onClick={() => applyTheme(dark ? 'light' : 'dark')}
               data-tip={dark ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
             >
@@ -1635,7 +1786,7 @@ export default function App() {
           <button type="button" className="primary" onClick={() => newEntry()}><Plus size={18} /> New Entry</button>
           <label className="record-search">
             <Search size={18} aria-hidden="true" />
-            <input type="search" aria-label="Search loaded records by merchant, notes, or date" placeholder="Search records" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input ref={searchInputRef} type="search" aria-label="Search loaded records by merchant, notes, or date" placeholder="Search records" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
         </div>
         <p className="ptr-hint no-print" aria-hidden="true">↓ Pull down to refresh</p>
@@ -1845,24 +1996,24 @@ export default function App() {
       </div>
 
       <nav className="bottom-nav no-print" inert={entryOpen ? true : undefined}>
-        <button type="button" onClick={go('records')} aria-label="Records">
+        <button type="button" className={navActive === 'records' ? 'active' : ''} onClick={go('records')} aria-label="Records">
           <List size={19} />
           <span>Records</span>
         </button>
         <button
           type="button"
-          className="bn-main"
+          className={`bn-main${navActive === 'new' ? ' active' : ''}`}
           aria-label="New entry"
-          onClick={() => newEntry()}
+          onClick={() => { setNavActive('new'); newEntry() }}
         >
           <Plus size={22} />
           <span>New</span>
         </button>
-        <button type="button" onClick={() => setShowMerchants(true)} aria-label="Merchants">
+        <button type="button" className={navActive === 'merchants' ? 'active' : ''} onClick={() => { setNavActive('merchants'); setShowMerchants(true) }} aria-label="Merchants">
           <Store size={19} />
           <span>Merchants</span>
         </button>
-        <button type="button" onClick={() => setCalcOpen(true)} aria-label="Calculator">
+        <button type="button" className={navActive === 'calc' ? 'active' : ''} onClick={() => { setNavActive('calc'); setCalcOpen(true) }} aria-label="Calculator">
           <Calculator size={19} />
           <span>Calc</span>
         </button>
@@ -1943,10 +2094,21 @@ export default function App() {
                   options={[{ value: 'dmy', label: '15 Oct 2026' }, { value: 'mdy', label: 'Oct 15, 2026' }, { value: 'iso', label: '2026-10-15' }]}
                   value={dateFmt} onChange={setDateFmt} />
               </label>
+              <label>Visual preset
+                <Select label="Visual preset"
+                  options={VISUAL_PRESETS.map((preset) => ({
+                    value: preset.value,
+                    label: preset.label,
+                    node: <span className="merchant-cell"><span className="accent-dot" style={{ background: preset.swatch }} />{preset.label}</span>,
+                  }))}
+                  value={visualPreset}
+                  onChange={applyVisualPreset}
+                />
+              </label>
               <label>Theme
                 <Select label="Theme"
                   options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'black', label: 'Black (OLED)' }]}
-                  value={theme} onChange={setTheme} />
+                  value={theme} onChange={applyTheme} />
               </label>
               <label>Density
                 <Select label="Density"
@@ -1956,8 +2118,20 @@ export default function App() {
               <label>Accent
                 <Select label="Accent color"
                   options={ACCENTS.map((a) => ({ value: a.value, label: a.label, node: <span className="merchant-cell"><span className="accent-dot" style={{ background: a.swatch }} />{a.label}</span> }))}
-                  value={accent} onChange={setAccent} />
+                  value={accent} onChange={applyAccent} />
               </label>
+            </div>
+          </div>
+          <div className="sheet-section">
+            <h3>Shortcuts</h3>
+            <div className="shortcut-list">
+              <div className="shortcut-item"><span>Command palette</span><span className="kbd-hint">Ctrl K</span></div>
+              <div className="shortcut-item"><span>New entry</span><span className="kbd-hint">Ctrl Alt N</span></div>
+              <div className="shortcut-item"><span>Focus search</span><span className="kbd-hint">Ctrl Alt F</span></div>
+              <div className="shortcut-item"><span>Refresh records</span><span className="kbd-hint">Ctrl Alt R</span></div>
+              <div className="shortcut-item"><span>Open analytics</span><span className="kbd-hint">Ctrl Alt A</span></div>
+              <div className="shortcut-item"><span>Open merchants</span><span className="kbd-hint">Ctrl Alt M</span></div>
+              <div className="shortcut-item"><span>Open calculator</span><span className="kbd-hint">Ctrl Alt C</span></div>
             </div>
           </div>
           <div className="sheet-section">

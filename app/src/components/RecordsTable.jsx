@@ -542,25 +542,53 @@ export default function RecordsTable({
     else if (s.dx > 50) setSwipedId((cur) => (cur === s.id ? null : cur))
   }
 
+  const merchantCount = useMemo(
+    () => new Set(records.map((r) => r.merchant_name).filter(Boolean)).size,
+    [records]
+  )
+  const hasActiveFilters = Boolean(filters.merchant || filters.from || filters.to || filters.tag || search.trim())
+
   return (
     <div className="section records-section workspace-section">
       <div className="sec-head no-print">
-        <h2 tabIndex={-1} ref={headingRef}>
-          Saved balances{' '}
-          <span className="count-chip" key={records.length}>
-            {records.length}
-          </span>
-        </h2>
-        <div className="cols-wrap" ref={colsRef}>
-          <button type="button" className="secondary" aria-expanded={colsOpen} aria-controls="column-options" onClick={() => setColsOpen((o) => !o)}>
-            <Columns3 size={16} /> Columns
-          </button>
-          {colsOpen && <div className="cols-pop" id="column-options">
-            {columns.filter((c) => c.hideable).map((c) => (
-              <label key={c.id} className="cols-item"><input type="checkbox" checked={!hiddenCols.includes(c.id)} onChange={() => toggleCol(c.id)} />{c.label}</label>
+        <div className="records-head-copy">
+          <h2 tabIndex={-1} ref={headingRef}>
+            Saved balances <span className="count-chip" key={records.length}>{records.length}</span>
+          </h2>
+          <p className="records-meta">
+            {records.length} record{records.length === 1 ? '' : 's'} • {merchantCount} merchant{merchantCount === 1 ? '' : 's'} • newest first
+          </p>
+        </div>
+        <div className="records-head-actions">
+          <div className="record-pills" role="group" aria-label="Quick date range">
+            {[
+              ['today', 'Today'],
+              ['week', 'This week'],
+              ['month', 'This month'],
+              ['all', 'All'],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                className={`record-pill ${activePreset === k ? 'on' : ''}`}
+                aria-pressed={activePreset === k}
+                onClick={applyPreset(k)}
+              >
+                {label}
+              </button>
             ))}
-            <button type="button" className="secondary" onClick={() => setHiddenCols(DEFAULT_HIDDEN)}>Reset columns</button>
-          </div>}
+          </div>
+          <div className="cols-wrap" ref={colsRef}>
+            <button type="button" className="secondary" aria-expanded={colsOpen} aria-controls="column-options" onClick={() => setColsOpen((o) => !o)}>
+              <Columns3 size={16} /> Columns
+            </button>
+            {colsOpen && <div className="cols-pop" id="column-options">
+              {columns.filter((c) => c.hideable).map((c) => (
+                <label key={c.id} className="cols-item"><input type="checkbox" checked={!hiddenCols.includes(c.id)} onChange={() => toggleCol(c.id)} />{c.label}</label>
+              ))}
+              <button type="button" className="secondary" onClick={() => setHiddenCols(DEFAULT_HIDDEN)}>Reset columns</button>
+            </div>}
+          </div>
         </div>
       </div>
       <>
@@ -598,21 +626,6 @@ export default function RecordsTable({
                 />
               </label>
             )}
-            <div className="seg-group" role="group" aria-label="Quick date range">
-              {[['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Week'], ['month', 'Month'], ['all', 'All']].map(
-                ([k, label]) => (
-                  <button
-                    key={k}
-                    type="button"
-                    className={`seg-btn ${activePreset === k ? 'on' : ''}`}
-                    aria-pressed={activePreset === k}
-                    onClick={applyPreset(k)}
-                  >
-                    {label}
-                  </button>
-                )
-              )}
-            </div>
             <div className="actions">
               <button type="button" className="secondary" disabled={loading} onClick={onRefresh}>
                 <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
@@ -698,16 +711,39 @@ export default function RecordsTable({
                   Array.from({ length: 5 }).map((_, i) => (
                     <tr key={`skel-${i}`}>
                       <td colSpan={COLS}>
-                        <div className="skel" />
+                        <div className="records-loading">
+                          <div className="records-loading-top">
+                            <div className="skel skel-line skel-line-lg" />
+                            <div className="skel skel-line skel-line-md" />
+                          </div>
+                          <div className="records-loading-grid">
+                            <div className="skel skel-line skel-line-sm" />
+                            <div className="skel skel-line skel-line-sm" />
+                            <div className="skel skel-line skel-line-sm" />
+                          </div>
+                        </div>
                       </td>
                     </tr>
                   ))
                 ) : pageRows.length === 0 ? (
                   <tr>
                     <td colSpan={COLS} className="empty">
-                      <div className="empty-state">
-                        <Inbox size={30} aria-hidden="true" />
-                        <p>{search || filters.merchant || filters.from || filters.to || filters.tag ? 'No matching records. Try changing the search or filters.' : 'No records yet. Use New Entry to add your first balance.'}</p>
+                      <div className="records-empty-panel">
+                        <Inbox size={34} aria-hidden="true" />
+                        <div>
+                          <h3>{records.length ? 'No matching records' : 'No saved balances yet'}</h3>
+                          <p>{hasActiveFilters ? 'Try a different merchant, date range, tag, or search term.' : 'Use New Entry to add your first saved balance.'}</p>
+                        </div>
+                        <div className="records-empty-actions">
+                          {hasActiveFilters && (
+                            <button type="button" className="secondary" onClick={() => removeFilter({ merchant: '', from: '', to: '', tag: '', preset: '' }, true)}>
+                              Clear filters
+                            </button>
+                          )}
+                          <button type="button" className="secondary" onClick={onRefresh}>
+                            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+                          </button>
+                        </div>
                       </div>
                     </td>
                   </tr>
@@ -751,16 +787,37 @@ export default function RecordsTable({
 
           <div className="record-cards no-print">
             {!loading && !pageRows.length && (
-              <div className="empty-state">
-                <Inbox size={30} aria-hidden="true" />
-                <p>No matching records. Add an entry or adjust your filters.</p>
+              <div className="records-empty-panel">
+                <Inbox size={34} aria-hidden="true" />
+                <div>
+                  <h3>{records.length ? 'No matching records' : 'No saved balances yet'}</h3>
+                  <p>{hasActiveFilters ? 'Try a different merchant, date range, tag, or search term.' : 'Use New Entry to add your first saved balance.'}</p>
+                </div>
+                <div className="records-empty-actions">
+                  {hasActiveFilters && (
+                    <button type="button" className="secondary" onClick={() => removeFilter({ merchant: '', from: '', to: '', tag: '', preset: '' }, true)}>
+                      Clear filters
+                    </button>
+                  )}
+                  <button type="button" className="secondary" onClick={onRefresh}>
+                    <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+                  </button>
+                </div>
               </div>
             )}
             {loading
               ? Array.from({ length: 4 }).map((_, i) => (
                   <div key={`rskel-${i}`} className="record-card">
-                    <div className="skel" style={{ width: '50%', marginBottom: 10 }} />
-                    <div className="skel" style={{ width: '80%' }} />
+                    <div className="records-loading">
+                      <div className="records-loading-top">
+                        <div className="skel skel-line skel-line-lg" />
+                        <div className="skel skel-line skel-line-md" />
+                      </div>
+                      <div className="records-loading-grid">
+                        <div className="skel skel-line skel-line-sm" />
+                        <div className="skel skel-line skel-line-sm" />
+                      </div>
+                    </div>
                   </div>
                 ))
               : pageRows.map((row, i) => {
