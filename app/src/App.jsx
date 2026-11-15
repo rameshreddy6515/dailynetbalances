@@ -826,10 +826,15 @@ export default function App() {
     if (f.merchant) query = query.eq('merchant_name', f.merchant)
     if (f.from) query = query.gte('balance_date', f.from)
     if (f.to) query = query.lte('balance_date', f.to)
-    const { data, error } = await query
-    if (error) setStatus({ type: 'error', text: error.message })
-    else setRecords(data || [])
-    setLoading(false)
+    try {
+      const { data, error } = await query
+      if (error) setStatus({ type: 'error', text: error.message })
+      else setRecords(data || [])
+    } catch (err) {
+      setStatus({ type: 'error', text: err?.message || 'Could not load records.' })
+    } finally {
+      setLoading(false)
+    }
   }, [session])
 
   const loadWallet = useCallback(async () => {

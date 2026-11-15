@@ -280,7 +280,7 @@ export default function RecordsTable({
         id: 'change',
         label: 'Change',
         sort: 'change',
-        tip: 'End of day − Opening + Cash Out + To Bank + Misc',
+        tip: 'Closing − Opening + Cash Out + To Bank + Misc',
         cell: (r) => {
           const c = changeOf(r)
           const status = r.id === bestId ? 'Highest change' : r.id === worstId ? 'Lowest change' : ''

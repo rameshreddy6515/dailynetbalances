@@ -2257,7 +2257,7 @@ tr.row-worst td:first-child {
 .skel {
   height: 14px;
   border-radius: 6px;
-  background: linear-gradient(90deg, var(--secondary-bg) 25%, var(--hover) 50%, var(--secondary-bg) 75%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--text) 14%, transparent) 25%, color-mix(in srgb, var(--text) 5%, transparent) 50%, color-mix(in srgb, var(--text) 14%, transparent) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.2s infinite;
 }
@@ -4903,10 +4903,10 @@ body::after {
     gap: 12px;
   }
   .workspace-actions .primary {
-    width: 100%;
-    justify-content: center;
+    display: none;
   }
   .workspace .record-search {
+    flex: 0 0 auto;
     width: 100%;
     max-width: none;
   }
@@ -4966,13 +4966,12 @@ body::after {
     box-shadow: inset 0 1px 0 var(--glass-highlight), 0 10px 20px color-mix(in srgb, var(--primary) 14%, transparent);
   }
   .bottom-nav button.bn-main {
-    transform: translateY(-10px);
     background: var(--primary-grad);
     color: #fff;
     box-shadow: 0 14px 30px color-mix(in srgb, var(--primary) 35%, transparent);
   }
   .bottom-nav button.bn-main.active {
-    transform: translateY(-10px) scale(1.03);
+    transform: scale(1.03);
     box-shadow: 0 16px 34px color-mix(in srgb, var(--primary) 40%, transparent);
   }
 }

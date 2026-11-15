@@ -215,24 +215,9 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
     try {
       if (closing === 0 && opening > 0) {
         const sure = await onConfirm(
-          `End of day amount is 0 but opening balance is ${opening}. Is the wallet really empty?`
+          `Closing balance is 0 but opening balance is ${opening}. Is the wallet really empty?`
         )
         if (!sure) return
-      }
-      if (!editingRow && supabase) {
-        const { count } = await supabase
-          .from('daily_balances')
-          .select('id', { count: 'exact', head: true })
-          .eq('merchant_name', payload.merchant_name)
-          .eq('balance_date', payload.balance_date)
-        if (
-          count > 0 &&
-          !(await onConfirm(
-            `${count} record${count === 1 ? '' : 's'} already exist${count === 1 ? 's' : ''} for ${payload.merchant_name} on ${payload.balance_date}. Save another entry?`
-          ))
-        ) {
-          return
-        }
       }
 
       const ok = await onSubmit(payload, editingRow?.id, addAnother)
@@ -344,7 +329,7 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
         </label>
 
         <label>
-          End of day amount
+          Closing balance
           <NumInput
             value={form.closing}
             onChange={(v) => {
@@ -388,7 +373,7 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
           </span>
         )}
         <div className="muted">
-          Expected closing {fmt(expectedClosing, currency)} · Wallet change (End of day − Opening):{' '}
+          Expected closing {fmt(expectedClosing, currency)} · Wallet change (Closing − Opening):{' '}
           {walletChange >= 0 ? '+' : '−'}{fmt(Math.abs(walletChange), currency)}
         </div>
       </div>
@@ -461,8 +446,8 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
       <details className="hint">
         <summary>How is net change calculated?</summary>
         <p>
-          <code>today change = end of day amount − opening balance + move to bank + misc expense</code>.
-          Entering a Move to Bank amount lowers the end of day amount automatically, so the wallet drops and
+          <code>today change = closing balance − opening balance + move to bank + misc expense</code>.
+          Entering a Move to Bank amount lowers the closing balance automatically, so the wallet drops and
           the next opening starts lower — money moved to bank and misc expense are added back because they
           only moved money, they are not profit or loss.
         </p>

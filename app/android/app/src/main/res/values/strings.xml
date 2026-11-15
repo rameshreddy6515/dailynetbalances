@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Daily Net Balance</string>
+    <string name="title_activity_main">Daily Net Balance</string>
+    <string name="package_name">com.dailynetbalance.app</string>
+    <string name="custom_url_scheme">com.dailynetbalance.app</string>
+</resources>

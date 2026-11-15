@@ -28,11 +28,11 @@ export default function Select({ options, value, onChange, placeholder = 'Select
 
   const filtered = q ? options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : options
   const current = options.find((o) => o.value === value)
-  const close = () => {
+  const close = (refocus = true) => {
     clearTimeout(blurTimeout.current)
     setOpen(false)
     setQ('')
-    ref.current?.querySelector('.select-btn')?.focus()
+    if (refocus) ref.current?.querySelector('.select-btn')?.focus()
   }
   const keyDown = (e) => {
     if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); close(); return }
@@ -72,7 +72,13 @@ export default function Select({ options, value, onChange, placeholder = 'Select
             {filtered.map((o) => (
               <button type="button" role="option" key={o.value} aria-selected={o.value === value}
                 className={`select-item ${o.value === value ? 'active' : ''}`}
-                onClick={() => { onChange(o.value); close() }}>
+                onPointerDown={(e) => {
+                  if (e.pointerType !== 'touch') return
+                  e.preventDefault()
+                  onChange(o.value)
+                  close(false)
+                }}
+                onClick={(e) => { e.stopPropagation(); onChange(o.value); close() }}>
                 <span>{o.node || o.label}</span>{o.value === value && <Check size={14} aria-hidden="true" />}
               </button>
             ))}
