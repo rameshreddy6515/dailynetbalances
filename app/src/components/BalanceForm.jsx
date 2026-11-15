@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Loader2, Plus, Save } from 'lucide-react'
+import { ArrowRight, Check, Loader2, Plus, Save, Star } from 'lucide-react'
 import { supabase } from '../supabase'
-import { localToday, fmt } from '../format'
+import { amountToWords, evalMoneyExpr, fmt, localToday } from '../format'
 import Select from './Select'
 import DatePicker from './DatePicker'
 import MerchantAvatar from './MerchantAvatar'
 
 const DRAFT_KEY = 'balanceDraft'
-const toNumber = (v) => {
-  const n = Number(v)
-  return Number.isFinite(n) ? n : 0
-}
+const toNumber = (v) => evalMoneyExpr(v).value
 const blank = () => ({
   merchant: '',
   date: localToday(),
@@ -40,19 +37,69 @@ const loadDraft = () => {
   }
 }
 
-const NumInput = ({ value, onChange, required }) => (
-  <input
-    type="number"
-    step="0.01"
-    min="0"
-    placeholder="0.00"
-    value={value}
-    onChange={(e) => onChange(e.target.value)}
-    required={required}
-  />
-)
+const formatEvaluated = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2))
 
-export default function BalanceForm({ merchants, initialBalances, logoUrls = {}, editingRow, selectMerchant, copySource, currency, onSubmit, onConfirm, onCancelEdit, onClose, onBusyChange }) {
+const NumInput = ({ value, onChange, required, currency, indianFmt, showWords = false }) => {
+  const parsed = evalMoneyExpr(value)
+  const commitExpr = () => {
+    if (!parsed.isExpr || !parsed.valid) return false
+    onChange(formatEvaluated(parsed.value))
+    return true
+  }
+  const words = showWords && parsed.value > 0 ? amountToWords(parsed.value, indianFmt) : ''
+  return (
+    <>
+      <input
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        placeholder="0.00 or 1200+350"
+        value={value}
+        onChange={(e) => {
+          const raw = e.target.value
+          if (raw.endsWith('=')) {
+            const next = evalMoneyExpr(raw)
+            if (next.valid) {
+              onChange(formatEvaluated(next.value))
+              return
+            }
+          }
+          onChange(raw)
+        }}
+        onBlur={commitExpr}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && parsed.isExpr && parsed.valid) {
+            e.preventDefault()
+            commitExpr()
+          }
+        }}
+        required={required}
+      />
+      {parsed.isExpr && parsed.valid && (
+        <span className="math-preview">= {fmt(parsed.value, currency)}</span>
+      )}
+      {words && <span className="money-words">{words}</span>}
+    </>
+  )
+}
+
+export default function BalanceForm({
+  merchants,
+  pinnedMerchants = [],
+  loggedByDate = {},
+  indianFmt = true,
+  initialBalances,
+  logoUrls = {},
+  editingRow,
+  selectMerchant,
+  copySource,
+  currency,
+  onSubmit,
+  onConfirm,
+  onCancelEdit,
+  onClose,
+  onBusyChange,
+}) {
   const [form, setForm] = useState(loadDraft)
   const [openingSource, setOpeningSource] = useState(null)
   const [closingAuto, setClosingAuto] = useState(false)
@@ -183,6 +230,14 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
   const expectedClosing = opening + legacyCashIn - legacyCashOut - bank - misc
   const todayChange = walletChange + legacyCashOut + bank + misc
 
+  const pinnedSet = new Set(pinnedMerchants)
+  const loggedSet = loggedByDate[form.date]
+  const curIdx = merchants.indexOf(form.merchant)
+  const orderedAfter = curIdx >= 0
+    ? [...merchants.slice(curIdx + 1), ...merchants.slice(0, curIdx)]
+    : merchants
+  const nextPending = orderedAfter.find((m) => m !== form.merchant && !(loggedSet && loggedSet.has(m))) || ''
+
   const resetForm = (keepMerchant = true) => {
     closingTouched.current = false
     setClosingAuto(false)
@@ -193,7 +248,11 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (saving) return
-    const addAnother = e.nativeEvent.submitter?.value === 'another'
+    const submitMode = e.nativeEvent.submitter?.value || ''
+    const addAnother = submitMode === 'another'
+    const goNextPending = submitMode === 'nextPending'
+    const targetNext = goNextPending ? nextPending : ''
+    const keepOpen = addAnother || Boolean(targetNext)
     const payload = {
       merchant_name: form.merchant.trim(),
       balance_date: form.date,
@@ -220,9 +279,15 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
         if (!sure) return
       }
 
-      const ok = await onSubmit(payload, editingRow?.id, addAnother)
+      const ok = await onSubmit(payload, editingRow?.id, keepOpen)
       if (ok) {
-        if (addAnother) {
+        if (targetNext) {
+          closingTouched.current = false
+          setOpeningSource(null)
+          setClosingAuto(false)
+          setForm({ ...blank(), date: form.date, merchant: targetNext })
+          localStorage.removeItem(DRAFT_KEY)
+        } else if (addAnother) {
           closingTouched.current = false
           setForm(blank())
           localStorage.removeItem(DRAFT_KEY)
@@ -247,7 +312,17 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
           Merchant name
           <Select label="Merchant name" className="merchant-select" required invalid={!!validation && !form.merchant}
             options={[
-              ...merchants.map((m) => ({ value: m, label: m, node: <span className="merchant-cell"><MerchantAvatar name={m} logoUrl={logoUrls[m]} />{m}</span> })),
+              ...merchants.map((m) => ({
+                value: m,
+                label: m,
+                node: (
+                  <span className="merchant-cell">
+                    <MerchantAvatar name={m} logoUrl={logoUrls[m]} />
+                    {m}
+                    {pinnedSet.has(m) && <Star size={12} className="pin-star" aria-label="Pinned" />}
+                  </span>
+                ),
+              })),
               ...(form.merchant && !merchants.includes(form.merchant)
                 ? [{ value: form.merchant, label: form.merchant }]
                 : []),
@@ -290,6 +365,8 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
           Opening balance
           <NumInput
             value={form.opening}
+            currency={currency}
+            indianFmt={indianFmt}
             onChange={(v) => {
               setOpeningSource(null)
               setForm((f) => ({ ...f, opening: v, closing: closingTouched.current ? f.closing : v }))
@@ -307,6 +384,9 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
           Move to Bank
           <NumInput
             value={form.bank}
+            currency={currency}
+            indianFmt={indianFmt}
+            showWords
             onChange={(v) => {
               setForm((f) => {
                 const delta = toNumber(v) - toNumber(f.bank)
@@ -325,13 +405,22 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
 
         <label>
           Misc Expense
-          <NumInput value={form.misc} onChange={(v) => setForm((f) => ({ ...f, misc: v }))} />
+          <NumInput
+            value={form.misc}
+            currency={currency}
+            indianFmt={indianFmt}
+            showWords
+            onChange={(v) => setForm((f) => ({ ...f, misc: v }))}
+          />
         </label>
 
         <label>
           Closing balance
           <NumInput
             value={form.closing}
+            currency={currency}
+            indianFmt={indianFmt}
+            showWords
             onChange={(v) => {
               closingTouched.current = true
               setClosingAuto(false)
@@ -429,6 +518,12 @@ export default function BalanceForm({ merchants, initialBalances, logoUrls = {},
             </>
           )}
         </button>
+        {!editingRow && nextPending && (
+          <button type="submit" name="saveMode" value="nextPending" className="secondary save-next-btn" disabled={saving}
+            data-tip={`Save and switch to ${nextPending}`}>
+            <ArrowRight size={15} /> Save & next ({nextPending})
+          </button>
+        )}
         {!editingRow && (
           <button type="submit" name="saveMode" value="another" className="secondary" disabled={saving}
             data-tip="Save and keep the panel open for the next merchant">

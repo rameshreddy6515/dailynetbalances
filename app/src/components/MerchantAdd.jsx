@@ -1,8 +1,21 @@
 import { useState } from 'react'
-import { Check, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Check, ImagePlus, LoaderCircle, Pencil, Plus, Star, Trash2, X } from 'lucide-react'
 import MerchantAvatar from './MerchantAvatar'
 
-export default function MerchantAdd({ merchants, balances = {}, logoUrls = {}, onAdd, onRename, onDelete, onSetStart, onUploadLogo, onRemoveLogo }) {
+export default function MerchantAdd({
+  merchants,
+  pinnedMerchants = [],
+  onTogglePin,
+  balances = {},
+  logoUrls = {},
+  onAdd,
+  onRename,
+  onDelete,
+  onSetStart,
+  onUploadLogo,
+  onRemoveLogo,
+}) {
+  const pinnedSet = new Set(pinnedMerchants)
   const [name, setName] = useState('')
   const [startBal, setStartBal] = useState('')
   const [renaming, setRenaming] = useState(null)
@@ -67,9 +80,8 @@ export default function MerchantAdd({ merchants, balances = {}, logoUrls = {}, o
             <label>
               Starting balance
               <input
-                type="number"
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 placeholder="0.00"
                 value={startBal}
                 onChange={(e) => setStartBal(e.target.value)}
@@ -114,8 +126,24 @@ export default function MerchantAdd({ merchants, balances = {}, logoUrls = {}, o
                 ) : (
                   <>
                     <div className="merchant-row-head">
-                      <span className="m-name"><MerchantAvatar name={m} logoUrl={logoUrls[m]} />{m}</span>
+                      <span className="m-name">
+                        <MerchantAvatar name={m} logoUrl={logoUrls[m]} />
+                        {m}
+                        {pinnedSet.has(m) && <Star size={12} className="pin-star" aria-hidden="true" />}
+                      </span>
                       <div className="merchant-logo-actions">
+                        {onTogglePin && (
+                          <button
+                            type="button"
+                            className={`small secondary pin-btn${pinnedSet.has(m) ? ' pinned' : ''}`}
+                            aria-pressed={pinnedSet.has(m)}
+                            aria-label={pinnedSet.has(m) ? `Unpin ${m}` : `Pin ${m} to top`}
+                            data-tip={pinnedSet.has(m) ? 'Unpin merchant' : 'Pin to top'}
+                            onClick={() => onTogglePin(m)}
+                          >
+                            <Star size={14} />
+                          </button>
+                        )}
                         <label
                           className={`small secondary merchant-logo-upload${uploadingLogo === m ? ' is-uploading' : ''}`}
                           aria-live="polite"
@@ -154,9 +182,8 @@ export default function MerchantAdd({ merchants, balances = {}, logoUrls = {}, o
                       <span className="m-start">
                         Start
                         <input
-                          type="number"
-                          step="0.01"
-                          min="0"
+                          type="text"
+                          inputMode="decimal"
                           value={startValue(m)}
                           onChange={(e) => setStartValues((s) => ({ ...s, [m]: e.target.value }))}
                         />

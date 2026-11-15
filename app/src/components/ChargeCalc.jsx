@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, Info } from 'lucide-react'
+import { ArrowLeftRight, ChevronDown, ChevronUp, Info } from 'lucide-react'
 import Select from './Select'
-import { fmt, toNumber } from '../format'
+import { evalMoneyExpr, fmt, toNumber } from '../format'
 
 import { DEFAULT_PCTS, DEFAULT_TYPES } from '../chargeData'
 
 export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = DEFAULT_PCTS }) {
+  const [mode, setMode] = useState('forward')
   const [amount, setAmount] = useState('')
   const [typeName, setTypeName] = useState(() => localStorage.getItem('chargeTypeLast') || '')
   const [sel, setSel] = useState('')
@@ -16,20 +17,52 @@ export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = 
     const t = setTimeout(() => setReveal(false), 3000)
     return () => clearTimeout(t)
   }, [reveal])
-  const amt = toNumber(amount)
+
+  const inputAmt = evalMoneyExpr(amount).value
   const rate = toNumber(sel)
-  const charges = (amt * rate) / 100
+  const isReverse = mode === 'reverse'
+  const invalidRate = isReverse && rate >= 100
+  const swipeAmt = isReverse
+    ? (invalidRate ? 0 : rate > 0 ? inputAmt / (1 - rate / 100) : inputAmt)
+    : inputAmt
+  const charges = isReverse ? swipeAmt - inputAmt : (swipeAmt * rate) / 100
   const pct = String(types.find(([n]) => n === typeName)?.[1] ?? '')
-  const pctAmt = (amt * toNumber(pct)) / 100
-  const ccAmt = amt - charges
+  const pctAmt = (swipeAmt * toNumber(pct)) / 100
+  const ccAmt = swipeAmt - charges
+  const primaryOut = isReverse ? swipeAmt : ccAmt
+  const primaryLabel = isReverse ? 'Required Swipe Amount' : 'Final CC Amount'
   const finalAmt = charges - pctAmt
 
   return (
     <div className="charge-grid">
+      <div className="seg-group charge-mode-toggle" role="group" aria-label="Calculation direction">
+        <button
+          type="button"
+          className={`seg-btn${!isReverse ? ' active' : ''}`}
+          aria-pressed={!isReverse}
+          onClick={() => setMode('forward')}
+        >
+          Swipe → Net
+        </button>
+        <button
+          type="button"
+          className={`seg-btn${isReverse ? ' active' : ''}`}
+          aria-pressed={isReverse}
+          onClick={() => setMode('reverse')}
+        >
+          <ArrowLeftRight size={13} /> Net needed → Swipe
+        </button>
+      </div>
       <label>
-        Amount
-        <input type="number" step="0.01" min="0" placeholder="0.00" value={amount}
-          onChange={(e) => setAmount(e.target.value)} autoFocus />
+        {isReverse ? 'Net payout needed' : 'Amount'}
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="0.00"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          autoFocus
+        />
       </label>
       <label>
         <span>
@@ -50,7 +83,7 @@ export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = 
         />
       </label>
       <fieldset className="pct-presets">
-        <legend className="charge-legend">Charge rate{rate > 0 && <> — deducts {fmt(charges, currency)}</>}</legend>
+        <legend className="charge-legend">Charge rate{rate > 0 && !invalidRate && <> — deducts {fmt(charges, currency)}</>}</legend>
         {presets.map((v) => (
           <label key={v} className={`pct-chip${rate === v ? ' on' : ''}`}>
             <input
@@ -65,23 +98,23 @@ export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = 
           </label>
         ))}
         <input
-          type="number"
+          type="text"
+          inputMode="decimal"
           className="pct-custom"
-          step="0.01"
-          min="0"
           placeholder="Custom %"
           aria-label="Custom charge rate"
           value={sel}
           onChange={(e) => setSel(e.target.value)}
         />
       </fieldset>
+      {invalidRate && <p className="message error" role="alert">Charge rate must be below 100% in reverse mode.</p>}
       <label>
         Merchant Charges
         <input key={fmt(charges, currency)} type="text" readOnly value={fmt(charges, currency)} aria-label="Merchant charges (calculated)" />
       </label>
       <label>
-        Final CC Amount
-        <input key={fmt(ccAmt, currency)} type="text" readOnly value={fmt(ccAmt, currency)} aria-label="Final CC amount (calculated)" />
+        {primaryLabel}
+        <input key={fmt(primaryOut, currency)} type="text" readOnly value={fmt(primaryOut, currency)} aria-label={`${primaryLabel} (calculated)`} />
       </label>
       <label className={`charge-final${finalAmt < 0 ? ' neg' : ''}`}>
         <span className="charge-final-head">

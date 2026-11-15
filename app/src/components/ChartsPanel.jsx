@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import {
   ResponsiveContainer,
   LineChart,
@@ -12,12 +12,27 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts'
-import { changeOf, toNumber } from '../format'
+import { changeOf, localToday, toNumber } from '../format'
 
 const COLORS = ['#4f46e5', '#0284c7', '#059669', '#d97706', '#e11d48', '#7c3aed', '#0891b2', '#65a30d']
+const WEEKDAYS_MON = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-export default function ChartsPanel({ records, currency, loading }) {
+const shiftMonth = (ym, delta) => {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+export default function ChartsPanel({
+  records,
+  calendarRecords,
+  selectedDate = '',
+  onSelectDate,
+  currency,
+  loading,
+}) {
   const [range, setRange] = useState('all')
+  const [userMonth, setUserMonth] = useState('')
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sec.charts') === '1')
 
   useEffect(() => {
@@ -63,6 +78,56 @@ export default function ChartsPanel({ records, currency, loading }) {
     }))
   }, [records])
 
+  const calSource = calendarRecords ?? records
+  const byFullDate = useMemo(() => {
+    const map = {}
+    let latest = ''
+    for (const r of calSource) {
+      const d = r.balance_date || ''
+      if (!d) continue
+      if (d > latest) latest = d
+      const slot = (map[d] ||= { change: 0, count: 0 })
+      slot.change += changeOf(r)
+      slot.count += 1
+    }
+    return { map, latest }
+  }, [calSource])
+
+  const todayStr = localToday()
+  const defaultMonth = selectedDate
+    ? selectedDate.slice(0, 7)
+    : (byFullDate.latest ? byFullDate.latest.slice(0, 7) : todayStr.slice(0, 7))
+  const activeMonth = userMonth || defaultMonth
+
+  const calendarData = useMemo(() => {
+    const [year, month] = activeMonth.split('-').map(Number)
+    const daysInMonth = new Date(year, month, 0).getDate()
+    const firstOffset = (new Date(year, month - 1, 1).getDay() + 6) % 7
+    const label = new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+    const cells = []
+    let maxAbs = 0
+    let loggedDays = 0
+    let monthNet = 0
+    let elapsedDays = 0
+    let bestDay = null
+    let worstDay = null
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const dateStr = `${activeMonth}-${String(day).padStart(2, '0')}`
+      const entry = byFullDate.map[dateStr] || null
+      if (dateStr <= todayStr) elapsedDays += 1
+      if (entry) {
+        loggedDays += 1
+        monthNet += entry.change
+        if (Math.abs(entry.change) > maxAbs) maxAbs = Math.abs(entry.change)
+        if (!bestDay || entry.change > byFullDate.map[bestDay].change) bestDay = dateStr
+        if (!worstDay || entry.change < byFullDate.map[worstDay].change) worstDay = dateStr
+      }
+      cells.push({ day, dateStr, entry })
+    }
+    if (loggedDays < 2) { bestDay = null; worstDay = null }
+    return { label, firstOffset, cells, maxAbs: maxAbs || 1, loggedDays, elapsedDays, monthNet, bestDay, worstDay }
+  }, [activeMonth, byFullDate, todayStr])
+
   if (loading) {
     return (
       <>
@@ -80,7 +145,7 @@ export default function ChartsPanel({ records, currency, loading }) {
       </>
     )
   }
-  if (!records.length) return null
+  if (!records.length && !calSource.length) return null
 
   const bestDay = weekday.reduce((a, b) => (b.change > a.change ? b : a))
   const worstDay = weekday.reduce((a, b) => (b.change < a.change ? b : a))
@@ -175,6 +240,99 @@ export default function ChartsPanel({ records, currency, loading }) {
         <div className="chart-foot">
           Best: <b className="pos">{bestDay.day} ({money(bestDay.change)})</b> · Worst:{' '}
           <b className="neg">{worstDay.day} ({money(worstDay.change)})</b>
+        </div>
+      </div>
+
+      <div className="chart-card cal-card">
+        <div className="chart-head">
+          <h3>Activity calendar <span className="chart-sub">tap a day to filter</span></h3>
+          <div className="cal-nav">
+            <button
+              type="button"
+              className="secondary small icon-button cal-nav-btn"
+              aria-label="Previous month"
+              onClick={() => setUserMonth(shiftMonth(activeMonth, -1))}
+            >
+              <ChevronLeft size={15} />
+            </button>
+            <span className="cal-month-lbl">{calendarData.label}</span>
+            <button
+              type="button"
+              className="secondary small icon-button cal-nav-btn"
+              aria-label="Next month"
+              onClick={() => setUserMonth(shiftMonth(activeMonth, 1))}
+            >
+              <ChevronRight size={15} />
+            </button>
+            {activeMonth !== todayStr.slice(0, 7) && (
+              <button
+                type="button"
+                className="secondary small cal-today-btn"
+                onClick={() => setUserMonth(todayStr.slice(0, 7))}
+              >
+                Today
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="cal-weekdays" aria-hidden="true">
+          {WEEKDAYS_MON.map((d) => <span key={d}>{d}</span>)}
+        </div>
+        <div className="cal-grid" role="grid" aria-label={`Activity calendar for ${calendarData.label}`}>
+          {Array.from({ length: calendarData.firstOffset }, (_, idx) => (
+            <span key={`pad-${idx}`} className="cal-pad" aria-hidden="true" />
+          ))}
+          {calendarData.cells.map(({ day, dateStr, entry }) => {
+            const isSelected = selectedDate === dateStr
+            const isToday = todayStr === dateStr
+            const isFuture = dateStr > todayStr
+            const isBest = calendarData.bestDay === dateStr
+            const isWorst = calendarData.worstDay === dateStr
+            const ratio = entry ? Math.min(1, Math.abs(entry.change) / calendarData.maxAbs) : 0
+            const alpha = entry ? (0.18 + ratio * 0.56).toFixed(2) : 0
+            const tone = entry
+              ? (entry.change > 0.004 ? 'is-pos' : entry.change < -0.004 ? 'is-neg' : 'is-flat')
+              : (isFuture ? 'is-future' : 'is-gap')
+            const tip = entry
+              ? `${dateStr}: ${entry.change >= 0 ? '+' : '−'}${money(Math.abs(entry.change))} (${entry.count} entr${entry.count === 1 ? 'y' : 'ies'})`
+              : `${dateStr}: ${isFuture ? 'Upcoming' : 'No entries logged'}`
+            return (
+              <button
+                key={dateStr}
+                type="button"
+                className={`cal-day ${tone}${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}${isBest ? ' is-best' : ''}${isWorst ? ' is-worst' : ''}`}
+                style={entry ? { '--cal-alpha': alpha } : undefined}
+                aria-pressed={isSelected}
+                aria-label={tip}
+                title={tip}
+                onClick={() => onSelectDate?.(dateStr)}
+              >
+                <span className="cal-day-num">{day}</span>
+                {entry && <span className="cal-day-dot" aria-hidden="true" />}
+                {(isBest || isWorst) && <span className="cal-badge" aria-hidden="true">{isBest ? 'BEST' : 'WORST'}</span>}
+              </button>
+            )
+          })}
+        </div>
+        <div className="chart-foot cal-foot">
+          <span>
+            Logged <b>{calendarData.loggedDays}</b>{calendarData.elapsedDays > 0 && ` / ${calendarData.elapsedDays}`} days · Net{' '}
+            <b className={calendarData.monthNet >= 0 ? 'pos' : 'neg'}>
+              {calendarData.monthNet >= 0 ? '+' : '−'}{money(Math.abs(calendarData.monthNet))}
+            </b>
+          </span>
+          <span className="cal-legend">
+            <span className="cal-key is-pos">Gain</span>
+            <span className="cal-key is-neg">Drop</span>
+            <span className="cal-key is-gap">Gap</span>
+            {calendarData.bestDay && <span className="cal-key is-best-key">Best</span>}
+            {calendarData.worstDay && <span className="cal-key is-worst-key">Worst</span>}
+            {selectedDate && (
+              <button type="button" className="secondary small cal-clear-btn" onClick={() => onSelectDate?.(selectedDate)}>
+                <X size={12} /> {selectedDate}
+              </button>
+            )}
+          </span>
         </div>
       </div>
     </div>

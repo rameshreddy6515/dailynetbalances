@@ -21,6 +21,9 @@ import ChargeTypes from './components/ChargeTypes'
 import PresetRates from './components/PresetRates'
 import pkg from '../package.json'
 import { registerSW } from './pwa'
+import { Capacitor } from '@capacitor/core'
+import { App as CapApp } from '@capacitor/app'
+import { StatusBar, Style } from '@capacitor/status-bar'
 import {
   AlertTriangle,
   ArrowDown,
@@ -45,6 +48,7 @@ import {
   RefreshCw,
   Settings,
   SlidersHorizontal,
+  Star,
   Store,
   Sun,
   Trash2,
@@ -52,7 +56,7 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import { changeOf, fmt, toNumber, CURRENCIES, localToday, localDay, latestWalletEntries, displayDate, setNumberLocale, setDateFormat } from './format'
+import { changeOf, fmt, toNumber, CURRENCIES, localToday, localDay, latestWalletEntries, displayDate, setNumberLocale, setDateFormat, merchantColor } from './format'
 
 const OPTIONAL_COLS = ['entry_type', 'misc_expense', 'bank_amount', 'tags']
 const TODAY_LABEL = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
@@ -69,10 +73,13 @@ const DEFAULT_ACCOUNT_PREFERENCES = {
   indianFmt: true,
   dateFmt: 'dmy',
   density: 'comfortable',
+  textSize: 'normal',
+  highContrast: false,
   accent: 'indigo',
   chargeTypes: DEFAULT_TYPES,
   chargePresets: DEFAULT_PCTS,
   reminder: { enabled: false, time: '21:00' },
+  pinnedMerchants: [],
   visualPreset: 'custom',
   dashConfig: DEFAULT_CFG,
 }
@@ -103,9 +110,10 @@ function normalizeDashboardConfig(value, fallback = DEFAULT_CFG) {
 
 function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENCES) {
   const source = value && typeof value === 'object' ? value : {}
-  const allowedThemes = ['system', 'light', 'dark', 'black']
+  const allowedThemes = ['system', 'night', 'light', 'dark', 'black']
   const allowedDateFormats = ['dmy', 'mdy', 'iso']
   const allowedDensities = ['comfortable', 'compact']
+  const allowedTextSizes = TEXT_SIZES.map(({ value }) => value)
   const allowedAccents = ACCENTS.map(({ value: accent }) => accent)
   const allowedPresets = VISUAL_PRESETS.map(({ value }) => value)
   const validReminderTime = (time) => typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
@@ -121,6 +129,8 @@ function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENC
     indianFmt: typeof source.indianFmt === 'boolean' ? source.indianFmt : fallback.indianFmt,
     dateFmt: allowedDateFormats.includes(source.dateFmt) ? source.dateFmt : fallback.dateFmt,
     density: allowedDensities.includes(source.density) ? source.density : fallback.density,
+    textSize: allowedTextSizes.includes(source.textSize) ? source.textSize : fallback.textSize,
+    highContrast: typeof source.highContrast === 'boolean' ? source.highContrast : fallback.highContrast,
     accent: allowedAccents.includes(source.accent) ? source.accent : fallback.accent,
     chargeTypes: validChargeTypes(source.chargeTypes) ? source.chargeTypes : fallback.chargeTypes,
     chargePresets: validChargePresets(source.chargePresets) ? source.chargePresets : fallback.chargePresets,
@@ -128,6 +138,9 @@ function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENC
       enabled: typeof reminder.enabled === 'boolean' ? reminder.enabled : fallback.reminder.enabled,
       time: validReminderTime(reminder.time) ? reminder.time : fallback.reminder.time,
     },
+    pinnedMerchants: Array.isArray(source.pinnedMerchants)
+      ? [...new Set(source.pinnedMerchants.filter((m) => typeof m === 'string' && m.trim()))]
+      : fallback.pinnedMerchants,
     visualPreset: allowedPresets.includes(source.visualPreset)
       ? source.visualPreset
       : resolveVisualPreset(source.theme ?? fallback.theme, source.accent ?? fallback.accent),
@@ -166,7 +179,22 @@ const VISUAL_PRESETS = [
   { value: 'glass', label: 'Glass Blue', theme: 'dark', accent: 'ocean', note: 'Bright blue glass', swatch: 'linear-gradient(135deg,#0ea5e9,#2563eb)' },
   { value: 'sunlit', label: 'Sunlit Soft', theme: 'light', accent: 'indigo', note: 'Bright airy workspace', swatch: 'linear-gradient(135deg,#f59e0b,#fbbf24)' },
   { value: 'ember', label: 'Amber Ember', theme: 'dark', accent: 'amber', note: 'Warm cinematic glow', swatch: 'linear-gradient(135deg,#f97316,#ef4444)' },
+  { value: 'meadow', label: 'Meadow Fresh', theme: 'light', accent: 'emerald', note: 'Soft green daylight', swatch: 'linear-gradient(135deg,#34d399,#a7f3d0)' },
+  { value: 'paper', label: 'Warm Paper', theme: 'light', accent: 'amber', note: 'Calm cream ledger', swatch: 'linear-gradient(135deg,#fde68a,#f5e6c8)' },
+  { value: 'diwali', label: 'Diwali Glow', theme: 'dark', accent: 'rose', note: 'Festival of lights', swatch: 'linear-gradient(135deg,#f59e0b,#f43f5e)' },
+  { value: 'newyear', label: 'New Year Sparkle', theme: 'light', accent: 'teal', note: 'Fresh start', swatch: 'linear-gradient(135deg,#14b8a6,#fbbf24)' },
 ]
+const TEXT_SIZES = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'large', label: 'Large' },
+  { value: 'xl', label: 'Extra large' },
+]
+const NIGHT_START_HOUR = 19
+const NIGHT_END_HOUR = 7
+const isNightNow = () => {
+  const hour = new Date().getHours()
+  return hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR
+}
 const resolveVisualPreset = (themeValue, accentValue) => VISUAL_PRESETS.find(
   (preset) => preset.value !== 'custom' && preset.theme === themeValue && preset.accent === accentValue,
 )?.value || 'custom'
@@ -250,6 +278,9 @@ export default function App() {
   })
   const [dateFmt, setDateFmt] = useState(() => localStorage.getItem('datefmt') || 'dmy')
   const [density, setDensity] = useState(() => localStorage.getItem('density') || 'comfortable')
+  const [textSize, setTextSize] = useState(() => localStorage.getItem('textSize') || 'normal')
+  const [highContrast, setHighContrast] = useState(() => localStorage.getItem('highContrast') === '1')
+  const [isNight, setIsNight] = useState(isNightNow)
   const settingsRestoreRef = useRef(null)
   const [bankOpen, setBankOpen] = useState(false)
   const [walletLoading, setWalletLoading] = useState(true)
@@ -474,6 +505,55 @@ export default function App() {
     setConfirmState(null)
   }
 
+  const backHandlerRef = useRef(null)
+  useEffect(() => {
+    backHandlerRef.current = () => {
+      if (entryOpen) { closeEntry(); return }
+      if (confirmState) { closeConfirm(false); return }
+      const closers = [
+        [settingsOpen, () => setSettingsOpen(false)],
+        [chargeOpen, () => setChargeOpen(false)],
+        [calcOpen, () => setCalcOpen(false)],
+        [walletOpen, () => setWalletOpen(false)],
+        [bankOpen, () => setBankOpen(false)],
+        [showMerchants, () => setShowMerchants(false)],
+        [typesOpen, () => setTypesOpen(false)],
+        [presetsOpen, () => setPresetsOpen(false)],
+        [dashOpen, () => setDashOpen(false)],
+        [paletteOpen, () => setPaletteOpen(false)],
+        [pendingOpen, () => setPendingOpen(false)],
+      ]
+      for (const [open, close] of closers) {
+        if (open) { close(); return }
+      }
+      const openDialog = document.querySelector('dialog[open]')
+      if (openDialog) {
+        openDialog.dispatchEvent(new Event('cancel', { cancelable: true }))
+        return
+      }
+      const openMenu = document.querySelector('details[open]')
+      if (openMenu) {
+        openMenu.removeAttribute('open')
+        return
+      }
+      CapApp.exitApp()
+    }
+  })
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let handle = null
+    let disposed = false
+    CapApp.addListener('backButton', () => backHandlerRef.current()).then((h) => {
+      if (disposed) h.remove()
+      else handle = h
+    })
+    return () => {
+      disposed = true
+      handle?.remove()
+    }
+  }, [])
+
   useEffect(() => {
     localStorage.setItem('currency', currency)
   }, [currency])
@@ -495,6 +575,16 @@ export default function App() {
     document.documentElement.dataset.density = density === 'compact' ? 'compact' : ''
     localStorage.setItem('density', density)
   }, [density])
+
+  useEffect(() => {
+    document.documentElement.dataset.text = textSize === 'normal' ? '' : textSize
+    localStorage.setItem('textSize', textSize)
+  }, [textSize])
+
+  useEffect(() => {
+    document.documentElement.dataset.contrast = highContrast ? 'high' : ''
+    localStorage.setItem('highContrast', highContrast ? '1' : '0')
+  }, [highContrast])
   const [reminder, setReminder] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('reminderSettings')) || { enabled: false, time: '21:00' }
@@ -502,6 +592,20 @@ export default function App() {
       return { enabled: false, time: '21:00' }
     }
   })
+  const [pinnedMerchants, setPinnedMerchants] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pinnedMerchants'))
+      return Array.isArray(saved) ? saved.filter((m) => typeof m === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  useEffect(() => {
+    localStorage.setItem('pinnedMerchants', JSON.stringify(pinnedMerchants))
+  }, [pinnedMerchants])
+  const togglePinMerchant = useCallback((name) => {
+    setPinnedMerchants((prev) => (prev.includes(name) ? prev.filter((m) => m !== name) : [...prev, name]))
+  }, [])
 
   const accountPreferences = useMemo(() => ({
     theme,
@@ -509,13 +613,16 @@ export default function App() {
     indianFmt,
     dateFmt,
     density,
+    textSize,
+    highContrast,
     accent,
     chargeTypes,
     chargePresets,
     reminder,
+    pinnedMerchants,
     visualPreset,
     dashConfig: dashCfg,
-  }), [theme, currency, indianFmt, dateFmt, density, accent, visualPreset, chargeTypes, chargePresets, reminder, dashCfg])
+  }), [theme, currency, indianFmt, dateFmt, density, textSize, highContrast, accent, visualPreset, chargeTypes, chargePresets, reminder, pinnedMerchants, dashCfg])
   const accountPreferencesRef = useRef(accountPreferences)
   useEffect(() => {
     accountPreferencesRef.current = accountPreferences
@@ -543,10 +650,13 @@ export default function App() {
       setIndianFmt(preferences.indianFmt)
       setDateFmt(preferences.dateFmt)
       setDensity(preferences.density)
+      setTextSize(preferences.textSize)
+      setHighContrast(preferences.highContrast)
       setAccent(preferences.accent)
       setChargeTypes(preferences.chargeTypes)
       setChargePresets(preferences.chargePresets)
       setReminder(preferences.reminder)
+      setPinnedMerchants(preferences.pinnedMerchants)
       setVisualPreset(preferences.visualPreset)
       setDashCfg(preferences.dashConfig)
     }
@@ -731,7 +841,19 @@ export default function App() {
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
-  const dark = theme === 'dark' || theme === 'black' || (theme === 'system' && sysDark)
+  useEffect(() => {
+    if (theme !== 'night') return
+    const tick = () => setIsNight(isNightNow())
+    tick()
+    const id = setInterval(tick, 60_000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [theme])
+
+  const dark = theme === 'dark' || theme === 'black' || (theme === 'system' && sysDark) || (theme === 'night' && isNight)
   const applyTheme = (nextTheme) => {
     setTheme(nextTheme)
     setVisualPreset(resolveVisualPreset(nextTheme, accent))
@@ -755,6 +877,12 @@ export default function App() {
     document.documentElement.dataset.theme = dark ? 'dark' : ''
     document.documentElement.dataset.oled = theme === 'black' ? '1' : ''
     localStorage.setItem('theme', theme)
+    const barColor = theme === 'black' ? '#000000' : dark ? '#0a0d14' : '#f8fafc'
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', barColor)
+    if (Capacitor.isNativePlatform()) {
+      StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light }).catch(() => {})
+      if (Capacitor.getPlatform() === 'android') StatusBar.setBackgroundColor({ color: barColor }).catch(() => {})
+    }
   }, [dark, theme])
 
   useEffect(() => {
@@ -1139,6 +1267,7 @@ export default function App() {
     }
 
     setMerchants((prev) => prev.filter((m) => m !== name))
+    setPinnedMerchants((prev) => prev.filter((m) => m !== name))
     setMerchantLogoPaths((paths) => {
       const next = { ...paths }
       delete next[name]
@@ -1210,6 +1339,7 @@ export default function App() {
     }
 
     setMerchants((prev) => prev.map((m) => (m === oldName ? newName : m)).sort((a, b) => a.localeCompare(b)))
+    setPinnedMerchants((prev) => prev.map((m) => (m === oldName ? newName : m)))
     setMerchantLogoPaths((paths) => {
       if (!paths[oldName]) return paths
       const next = { ...paths, [newName]: paths[oldName] }
@@ -1478,7 +1608,7 @@ export default function App() {
   )
 
   const sectionIds = new Set(['records', 'charts', 'leaderboard', 'recon'])
-  const navIds = new Set(['records', 'new', 'merchants', 'calc'])
+  const navIds = new Set(['records', 'new', 'calc'])
   const go = (id) => () => {
     const scrollTo = (target) => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth' })
     if (id === 'analytics') {
@@ -1513,10 +1643,35 @@ export default function App() {
     setPullDist(0)
   }
 
+  const orderedMerchants = useMemo(() => {
+    const pinnedSet = new Set(pinnedMerchants)
+    return [...merchants].sort((a, b) => {
+      const pa = pinnedSet.has(a) ? 0 : 1
+      const pb = pinnedSet.has(b) ? 0 : 1
+      if (pa !== pb) return pa - pb
+      return a.localeCompare(b)
+    })
+  }, [merchants, pinnedMerchants])
+
+  const loggedByDate = useMemo(() => {
+    const map = {}
+    for (const r of walletRows) {
+      if (!r.balance_date || !r.merchant_name) continue
+      if (!map[r.balance_date]) map[r.balance_date] = new Set()
+      map[r.balance_date].add(r.merchant_name)
+    }
+    return map
+  }, [walletRows])
+
+  const calendarRecords = useMemo(() => {
+    if (!filters.merchant) return walletRows
+    return walletRows.filter((r) => r.merchant_name === filters.merchant)
+  }, [walletRows, filters.merchant])
+
   const commands = (() => {
     return [
       { group: 'Merchant', label: 'Open merchant settings', run: () => setShowMerchants(true) },
-      ...merchants.map((m) => ({
+      ...orderedMerchants.map((m) => ({
         group: 'Merchant',
         label: `New entry — ${m}`,
         run: () => newEntry(m),
@@ -1574,7 +1729,8 @@ export default function App() {
   const showSkel = loading && records.length === 0
   const todayStr = localToday()
   const updatedToday = wallet.entries.filter((r) => r.balance_date === todayStr).length
-  const pendingToday = merchants.filter((m) => !wallet.entries.some((r) => r.merchant_name === m && r.balance_date === todayStr))
+  const pendingToday = orderedMerchants.filter((m) => !wallet.entries.some((r) => r.merchant_name === m && r.balance_date === todayStr))
+  const todayPct = merchants.length ? Math.min(100, Math.round((updatedToday / merchants.length) * 100)) : 0
   const brandLine = merchants.length
     ? `${TODAY_LABEL} · ${updatedToday} of ${merchants.length} merchant${merchants.length === 1 ? '' : 's'} updated today`
     : 'Track opening balance, money moved to bank, miscellaneous expense, and the end-of-day wallet amount per merchant.'
@@ -1598,10 +1754,28 @@ export default function App() {
     misc: { cls: 'stat-4', value: stats.misc, format: moneyFmt, lbl: 'Total Misc Exp', icon: <Receipt size={17} className="stat-icon" aria-hidden="true" /> },
   }
 
+  const selectedCalendarDate = filters.from && filters.from === filters.to ? filters.from : ''
+  const selectCalendarDate = (day) => {
+    const clearing = filters.from === day && filters.to === day
+    setFilters((f) => (
+      f.from === day && f.to === day
+        ? { ...f, from: '', to: '', preset: '' }
+        : { ...f, from: day, to: day, preset: '' }
+    ))
+    if (!clearing) go('records')()
+  }
+
   const sectionNodes = {
     charts: (
       <div key="charts" id="charts">
-        <ChartsPanel records={visibleRecords} currency={currency} loading={loading} />
+        <ChartsPanel
+          records={visibleRecords}
+          calendarRecords={calendarRecords}
+          selectedDate={selectedCalendarDate}
+          onSelectDate={selectCalendarDate}
+          currency={currency}
+          loading={loading}
+        />
       </div>
     ),
     leaderboard: (
@@ -1627,7 +1801,8 @@ export default function App() {
           records={visibleRecords}
           loading={loading}
           filters={filters}
-          merchants={merchants}
+          merchants={orderedMerchants}
+          pinnedMerchants={pinnedMerchants}
           logoUrls={merchantLogoUrls}
           currency={currency}
           onFiltersChange={setFilters}
@@ -1686,8 +1861,19 @@ export default function App() {
               </div>
             </div>
             {merchants.length ? (
-              <button type="button" className="brand-sub brand-sub-btn" aria-haspopup="dialog" onClick={() => setPendingOpen(true)}>
-                {brandLine}
+              <button
+                type="button"
+                className={`brand-sub brand-sub-btn${todayPct === 100 ? ' is-complete' : ''}`}
+                aria-haspopup="dialog"
+                onClick={() => setPendingOpen(true)}
+              >
+                <span className="brand-progress-head">
+                  <span>{brandLine}</span>
+                  <span className="brand-progress-pct">{todayPct === 100 ? 'All logged' : `${todayPct}%`}</span>
+                </span>
+                <span className="brand-progress-track" aria-hidden="true">
+                  <span className="brand-progress-fill" style={{ width: `${todayPct}%` }} />
+                </span>
               </button>
             ) : (
               <p className="brand-sub">{brandLine}</p>
@@ -1826,14 +2012,53 @@ export default function App() {
         ))}
       </div>
 
-      {walletOpen && (
+      {walletOpen && (() => {
+        const positiveEntries = wallet.entries
+          .filter((row) => toNumber(row.closing_balance) > 0)
+          .sort((a, b) => toNumber(b.closing_balance) - toNumber(a.closing_balance))
+        const positiveTotal = positiveEntries.reduce((sum, row) => sum + toNumber(row.closing_balance), 0)
+        return (
         <AccessibleDialog title="Wallet breakdown" className="wallet-dialog" onClose={() => setWalletOpen(false)}>
           <p>Each merchant’s latest recorded closing balance. Table filters do not affect this total.</p>
           {walletLoading && <p role="status">Loading wallet balances…</p>}
           {walletError && <div role="alert" className="message error">{walletError}</div>}
           <button type="button" className="secondary" disabled={walletLoading} onClick={loadWallet}>Refresh wallet</button>
+          {positiveTotal > 0 && (
+            <div className="wallet-dist" aria-label="Wallet share by merchant">
+              <div className="wallet-dist-bar">
+                {positiveEntries.map((row) => {
+                  const bal = toNumber(row.closing_balance)
+                  const share = (bal / positiveTotal) * 100
+                  return (
+                    <span
+                      key={row.merchant_name}
+                      className="wallet-dist-seg"
+                      style={{ width: `${share}%`, background: merchantColor(row.merchant_name) }}
+                      title={`${row.merchant_name}: ${fmt(bal, currency)} (${share.toFixed(1)}%)`}
+                    />
+                  )
+                })}
+              </div>
+              <div className="wallet-dist-legend">
+                {positiveEntries.map((row) => {
+                  const bal = toNumber(row.closing_balance)
+                  const share = (bal / positiveTotal) * 100
+                  return (
+                    <span key={row.merchant_name} className="wallet-dist-item">
+                      <span className="wallet-dist-dot" style={{ background: merchantColor(row.merchant_name) }} aria-hidden="true" />
+                      <span>{row.merchant_name}</span>
+                      <b>{share < 1 ? '<1%' : `${Math.round(share)}%`}</b>
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           <ul className="wallet-list" aria-label="Merchant wallet balances">
-            {wallet.entries.map((row, i) => (
+            {wallet.entries.map((row, i) => {
+              const bal = toNumber(row.closing_balance)
+              const share = positiveTotal > 0 && bal > 0 ? (bal / positiveTotal) * 100 : 0
+              return (
               <li key={row.merchant_name} style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
                 <div className="wallet-item">
                   <MerchantAvatar name={row.merchant_name} logoUrl={merchantLogoUrls[row.merchant_name]} />
@@ -1846,9 +2071,13 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                <b>{fmt(row.closing_balance, currency)}</b>
+                <div className="wallet-amt-col">
+                  <b>{fmt(row.closing_balance, currency)}</b>
+                  {share > 0 && <span className="wallet-share-pct">{share < 1 ? '<1%' : `${share.toFixed(1)}%`}</span>}
+                </div>
               </li>
-            ))}
+              )
+            })}
           </ul>
           {!walletLoading && !walletError && !wallet.entries.length && <p>No saved closing balances yet.</p>}
           {merchants.filter((m) => !wallet.entries.some((r) => r.merchant_name === m)).length > 0 && (
@@ -1862,7 +2091,8 @@ export default function App() {
             )}
           </div>
         </AccessibleDialog>
-      )}
+        )
+      })()}
 
       {pendingOpen && (
         <AccessibleDialog title="Pending updates" onClose={() => setPendingOpen(false)}>
@@ -1872,17 +2102,33 @@ export default function App() {
               <ul className="wallet-list" aria-label="Merchants pending today's entry">
                 {pendingToday.map((m, i) => {
                   const last = wallet.entries.find((r) => r.merchant_name === m)
+                  const isPinned = pinnedMerchants.includes(m)
                   return (
                     <li key={m} style={{ animationDelay: `${Math.min(i * 40, 320)}ms` }}>
                       <div className="wallet-item">
                         <MerchantAvatar name={m} logoUrl={merchantLogoUrls[m]} />
-                        <div><strong>{m}</strong>
+                        <div>
+                          <strong>
+                            {m}
+                            {isPinned && <Star size={12} className="pin-star" aria-hidden="true" />}
+                          </strong>
                           <span>{last ? `Last closing: ${fmt(last.closing_balance, currency)} · ${displayDate(last.balance_date)}` : 'No records yet'}</span>
                         </div>
                       </div>
-                      <button type="button" className="small primary" onClick={() => { setPendingOpen(false); newEntry(m) }}>
-                        <Plus size={14} /> Add entry
-                      </button>
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className={`small secondary pin-btn${isPinned ? ' pinned' : ''}`}
+                          aria-pressed={isPinned}
+                          aria-label={isPinned ? `Unpin ${m}` : `Pin ${m} to top`}
+                          onClick={() => togglePinMerchant(m)}
+                        >
+                          <Star size={14} />
+                        </button>
+                        <button type="button" className="small primary" onClick={() => { setPendingOpen(false); newEntry(m) }}>
+                          <Plus size={14} /> Add entry
+                        </button>
+                      </div>
                     </li>
                   )
                 })}
@@ -1952,7 +2198,9 @@ export default function App() {
       {showMerchants && (
         <AccessibleDialog title="Merchant Settings" className="merchant-settings-dialog" onClose={() => setShowMerchants(false)}>
             <MerchantAdd
-              merchants={merchants}
+              merchants={orderedMerchants}
+              pinnedMerchants={pinnedMerchants}
+              onTogglePin={togglePinMerchant}
               balances={initialBalances}
               logoUrls={merchantLogoUrls}
               onAdd={addMerchant}
@@ -1993,10 +2241,11 @@ export default function App() {
             <div><h2 id="entry-title">{editingRow ? 'Edit entry' : copySource ? 'Copy entry' : 'New entry'}</h2><p id="entry-description">Record the actual closing balance for this merchant.</p></div>
             <button type="button" className="secondary icon-button" aria-label="Close entry panel" disabled={entryBusy} onClick={closeEntry}><X size={20} /></button>
           </div>
-          <BalanceForm key={entryKey} merchants={merchants} initialBalances={initialBalances} logoUrls={merchantLogoUrls} editingRow={editingRow}
-            selectMerchant={selectMerchant} copySource={copySource} currency={currency}
-            onSubmit={saveRecord} onConfirm={askConfirm} onCancelEdit={() => setEditingRow(null)}
-            onClose={closeEntry} onBusyChange={setEntryBusy} />
+          <BalanceForm key={entryKey} merchants={orderedMerchants} pinnedMerchants={pinnedMerchants}
+            loggedByDate={loggedByDate} indianFmt={indianFmt} initialBalances={initialBalances}
+            logoUrls={merchantLogoUrls} editingRow={editingRow} selectMerchant={selectMerchant}
+            copySource={copySource} currency={currency} onSubmit={saveRecord} onConfirm={askConfirm}
+            onCancelEdit={() => setEditingRow(null)} onClose={closeEntry} onBusyChange={setEntryBusy} />
         </aside>
       </div>
 
@@ -2013,10 +2262,6 @@ export default function App() {
         >
           <Plus size={22} />
           <span>New</span>
-        </button>
-        <button type="button" className={navActive === 'merchants' ? 'active' : ''} onClick={() => { setNavActive('merchants'); setShowMerchants(true) }} aria-label="Merchants">
-          <Store size={19} />
-          <span>Merchants</span>
         </button>
         <button type="button" className={navActive === 'calc' ? 'active' : ''} onClick={() => { setNavActive('calc'); setCalcOpen(true) }} aria-label="Calculator">
           <Calculator size={19} />
@@ -2112,7 +2357,7 @@ export default function App() {
               </label>
               <label>Theme
                 <Select label="Theme"
-                  options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'black', label: 'Black (OLED)' }]}
+                  options={[{ value: 'system', label: 'System' }, { value: 'night', label: 'Auto (dark 7 PM–7 AM)' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'black', label: 'Black (OLED)' }]}
                   value={theme} onChange={applyTheme} />
               </label>
               <label>Density
@@ -2120,11 +2365,17 @@ export default function App() {
                   options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]}
                   value={density} onChange={setDensity} />
               </label>
+              <label>Text size
+                <Select label="Text size" options={TEXT_SIZES} value={textSize} onChange={setTextSize} />
+              </label>
               <label>Accent
                 <Select label="Accent color"
                   options={ACCENTS.map((a) => ({ value: a.value, label: a.label, node: <span className="merchant-cell"><span className="accent-dot" style={{ background: a.swatch }} />{a.label}</span> }))}
                   value={accent} onChange={applyAccent} />
               </label>
+            </div>
+            <div className="prefs-switch">
+              <Switch checked={highContrast} onChange={setHighContrast} label="High contrast (solid panels, stronger text)" />
             </div>
           </div>
           <div className="sheet-section">

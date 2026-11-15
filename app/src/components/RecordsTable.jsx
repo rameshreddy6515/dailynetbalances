@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Share2,
   SlidersHorizontal,
+  Star,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -68,6 +69,7 @@ export default function RecordsTable({
   loading,
   filters,
   merchants,
+  pinnedMerchants = [],
   allTags = [],
   logoUrls = {},
   currency,
@@ -92,6 +94,18 @@ export default function RecordsTable({
   const [swipedId, setSwipedId] = useState(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [detailRow, setDetailRow] = useState(null)
+  const [slipRow, setSlipRow] = useState(null)
+
+  const printSlip = (row) => {
+    setSlipRow(row)
+    setDetailRow(null)
+    requestAnimationFrame(() => {
+      document.body.classList.add('printing-slip')
+      window.print()
+      document.body.classList.remove('printing-slip')
+      setSlipRow(null)
+    })
+  }
   const headingRef = useRef(null)
   const [hiddenCols, setHiddenCols] = useState(() => {
     try {
@@ -599,7 +613,20 @@ export default function RecordsTable({
             <label>
               Merchant
               <Select label="Filter by merchant"
-                options={[{ value: '', label: 'All merchants' }, ...merchants.map((m) => ({ value: m, label: m, node: <span className="merchant-cell"><MerchantAvatar name={m} logoUrl={logoUrls[m]} />{m}</span> }))]}
+                options={[
+                  { value: '', label: 'All merchants' },
+                  ...merchants.map((m) => ({
+                    value: m,
+                    label: m,
+                    node: (
+                      <span className="merchant-cell">
+                        <MerchantAvatar name={m} logoUrl={logoUrls[m]} />
+                        {m}
+                        {pinnedMerchants.includes(m) && <Star size={12} className="pin-star" aria-label="Pinned" />}
+                      </span>
+                    ),
+                  })),
+                ]}
                 value={filters.merchant}
                 onChange={(v) => onFiltersChange({ ...filters, merchant: v })}
                 placeholder="All merchants"
@@ -932,6 +959,9 @@ export default function RecordsTable({
         </dl>
         <h3>Notes</h3><p className="detail-notes">{detailRow.notes || 'No notes for this entry.'}</p>
         <div className="detail-share-actions">
+          <button type="button" className="secondary" onClick={() => printSlip(detailRow)}>
+            <Printer size={15} /> Print daily slip
+          </button>
           <button type="button" className="secondary" onClick={() => exportMerchantPdf(detailRow.merchant_name)}>
             <FileText size={15} /> Merchant PDF Statement
           </button>
@@ -945,6 +975,48 @@ export default function RecordsTable({
           <button type="button" className="danger" onClick={() => detailAction(onDelete)}><Trash2 size={16} /> Delete</button>
         </div>
       </AccessibleDialog>}
+
+      {slipRow && (
+        <div className="slip" aria-hidden="true">
+          <div className="slip-head">
+            <b>DAILY BALANCE SLIP</b>
+            <span>{displayDate(slipRow.balance_date)}</span>
+          </div>
+          <div className="slip-merchant">{slipRow.merchant_name}</div>
+          <div className="slip-rows">
+            <span>Opening</span>
+            <b>{fmt(slipRow.opening_balance, currency)}</b>
+            {toNumber(slipRow.cash_out) > 0 && (
+              <>
+                <span>Cash Out</span>
+                <b>−{fmt(Math.abs(toNumber(slipRow.cash_out)), currency)}</b>
+              </>
+            )}
+            {toNumber(slipRow.bank_amount) > 0 && (
+              <>
+                <span>Move to Bank</span>
+                <b>{fmt(slipRow.bank_amount, currency)}</b>
+              </>
+            )}
+            {toNumber(slipRow.misc_expense) > 0 && (
+              <>
+                <span>Misc Expense</span>
+                <b>{fmt(slipRow.misc_expense, currency)}</b>
+              </>
+            )}
+            <span>Closing</span>
+            <b>{fmt(slipRow.closing_balance, currency)}</b>
+          </div>
+          <div className="slip-net">
+            <span>NET CHANGE</span>
+            <b>{changeOf(slipRow) >= 0 ? '+' : '−'}{fmt(Math.abs(changeOf(slipRow)), currency)}</b>
+          </div>
+          <div className="slip-foot">
+            <span>Recorded: {displayDate(slipRow.created_at, true)}</span>
+            <span>Merchant Daily Balance</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

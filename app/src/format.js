@@ -65,3 +65,117 @@ export const localDay = (offsetDays = 0) => {
 }
 
 export const localToday = () => localDay(0)
+
+export const evalMoneyExpr = (raw) => {
+  if (raw === null || raw === undefined) return { value: 0, isExpr: false, valid: false }
+  const str = String(raw).trim()
+  if (!str) return { value: 0, isExpr: false, valid: false }
+  const cleaned = str.replace(/[\s,]/g, '').replace(/=+$/, '')
+  if (!cleaned) return { value: 0, isExpr: false, valid: false }
+  if (/^\d*\.?\d*$/.test(cleaned) && cleaned !== '.') {
+    const n = Number(cleaned)
+    return { value: Number.isFinite(n) ? n : 0, isExpr: str.includes('='), valid: true }
+  }
+  if (!/^[0-9.+\-*/()]+$/.test(cleaned)) return { value: 0, isExpr: false, valid: false }
+  const expr = cleaned.replace(/[+\-*/.]+$/, '')
+  if (!expr) return { value: 0, isExpr: false, valid: false }
+  const isExpr = /[+*/()=]/.test(str) || /(?<=.)[-+]/.test(cleaned) || cleaned.slice(1).includes('-')
+
+  let pos = 0
+  const parseExpr = () => {
+    let left = parseTerm()
+    while (pos < expr.length && (expr[pos] === '+' || expr[pos] === '-')) {
+      const op = expr[pos++]
+      const right = parseTerm()
+      left = op === '+' ? left + right : left - right
+    }
+    return left
+  }
+  const parseTerm = () => {
+    let left = parseFactor()
+    while (pos < expr.length && (expr[pos] === '*' || expr[pos] === '/')) {
+      const op = expr[pos++]
+      const right = parseFactor()
+      left = op === '*' ? left * right : right === 0 ? NaN : left / right
+    }
+    return left
+  }
+  const parseFactor = () => {
+    if (expr[pos] === '+') { pos++; return parseFactor() }
+    if (expr[pos] === '-') { pos++; return -parseFactor() }
+    if (expr[pos] === '(') {
+      pos++
+      const v = parseExpr()
+      if (expr[pos] === ')') pos++
+      return v
+    }
+    const start = pos
+    while (pos < expr.length && /[0-9.]/.test(expr[pos])) pos++
+    if (start === pos) return NaN
+    return Number(expr.slice(start, pos))
+  }
+
+  const res = parseExpr()
+  if (pos !== expr.length || !Number.isFinite(res)) return { value: 0, isExpr, valid: false }
+  return { value: Math.max(0, Math.round(res * 100) / 100), isExpr, valid: true }
+}
+
+const ONES = [
+  '', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+  'seventeen', 'eighteen', 'nineteen',
+]
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
+
+const underHundred = (n) => {
+  if (n < 20) return ONES[n]
+  const t = TENS[Math.floor(n / 10)]
+  const o = ONES[n % 10]
+  return o ? `${t}-${o}` : t
+}
+
+const underThousand = (n) => {
+  const h = Math.floor(n / 100)
+  const r = n % 100
+  if (!h) return underHundred(r)
+  return r ? `${ONES[h]} hundred ${underHundred(r)}` : `${ONES[h]} hundred`
+}
+
+const intWordsIndian = (n) => {
+  if (n === 0) return 'zero'
+  const parts = []
+  const crore = Math.floor(n / 10000000)
+  const lakh = Math.floor((n % 10000000) / 100000)
+  const thousand = Math.floor((n % 100000) / 1000)
+  const rest = n % 1000
+  if (crore) parts.push(`${intWordsIndian(crore)} crore`)
+  if (lakh) parts.push(`${underHundred(lakh)} lakh`)
+  if (thousand) parts.push(`${underHundred(thousand)} thousand`)
+  if (rest) parts.push(underThousand(rest))
+  return parts.join(' ')
+}
+
+const intWordsIntl = (n) => {
+  if (n === 0) return 'zero'
+  const parts = []
+  const billion = Math.floor(n / 1000000000)
+  const million = Math.floor((n % 1000000000) / 1000000)
+  const thousand = Math.floor((n % 1000000) / 1000)
+  const rest = n % 1000
+  if (billion) parts.push(`${underThousand(billion)} billion`)
+  if (million) parts.push(`${underThousand(million)} million`)
+  if (thousand) parts.push(`${underThousand(thousand)} thousand`)
+  if (rest) parts.push(underThousand(rest))
+  return parts.join(' ')
+}
+
+export const amountToWords = (value, indian = numberLocale === 'en-IN') => {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0 || n >= 1e12) return ''
+  let whole = Math.floor(n)
+  let cents = Math.round((n - whole) * 100)
+  if (cents === 100) { whole += 1; cents = 0 }
+  const words = indian ? intWordsIndian(whole) : intWordsIntl(whole)
+  const full = cents > 0 ? `${words} and ${String(cents).padStart(2, '0')}/100` : words
+  return full.charAt(0).toUpperCase() + full.slice(1)
+}
