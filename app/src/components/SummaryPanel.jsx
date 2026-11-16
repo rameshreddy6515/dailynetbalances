@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ArrowUpRight, ChevronDown, X } from 'lucide-react'
 import { changeOf, fmt, toNumber } from '../format'
 import MerchantAvatar from './MerchantAvatar'
 
@@ -24,7 +24,7 @@ const Spark = ({ data }) => {
   )
 }
 
-export default function SummaryPanel({ records, currency, logoUrls = {} }) {
+export default function SummaryPanel({ records, currency, logoUrls = {}, activeMerchant = '', onSelectMerchant }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sec.leaderboard') === '1')
 
   useEffect(() => {
@@ -138,8 +138,10 @@ export default function SummaryPanel({ records, currency, logoUrls = {} }) {
       {!collapsed && (
         <>
           <div className="summary-grid no-print">
-            {summary.map((s, i) => (
-              <div className="summary-card" key={s.name}>
+            {summary.map((s, i) => {
+              const isSelected = activeMerchant === s.name
+              return (
+              <div className={`summary-card${isSelected ? ' is-selected' : ''}`} key={s.name}>
                 <div className="name">
                   <span className={`rank rank-${i + 1 <= 3 ? i + 1 : 'n'}`}>{i + 1}</span>
                   <span className="merchant-cell"><MerchantAvatar name={s.name} logoUrl={logoUrls[s.name]} />{s.name}</span>
@@ -165,8 +167,22 @@ export default function SummaryPanel({ records, currency, logoUrls = {} }) {
                   <span>Last Balance</span>
                   <b>{money(s.lastBalance, currency)}</b>
                 </div>
+                {onSelectMerchant && (
+                  <button
+                    type="button"
+                    className={`small secondary summary-filter-btn${isSelected ? ' active' : ''}`}
+                    onClick={() => onSelectMerchant(s.name)}
+                  >
+                    {isSelected ? (
+                      <>Showing in Records <X size={13} /></>
+                    ) : (
+                      <>View records <ArrowUpRight size={13} /></>
+                    )}
+                  </button>
+                )}
               </div>
-            ))}
+              )
+            })}
           </div>
           {recurringPatterns.length > 0 && (
             <div className="pattern-grid no-print">

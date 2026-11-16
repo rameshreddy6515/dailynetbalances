@@ -1,12 +1,18 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronDown, CopyX, CalendarOff, Link2Off } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, CopyX, CalendarOff, Link2Off, Plus } from 'lucide-react'
 import { fmt, toNumber, displayDate } from '../format'
 import MerchantAvatar from './MerchantAvatar'
 
 const DAY_MS = 86400000
 const dayNum = (dateStr) => Math.round(new Date(`${dateStr}T00:00:00`).getTime() / DAY_MS)
+const nextDayStr = (dateStr) => {
+  const [y, m, d] = String(dateStr || '').split('-').map(Number)
+  if (!y || !m || !d) return ''
+  const dt = new Date(y, m - 1, d + 1)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
 
-export default function ReconPanel({ rows = [], currency, logoUrls = {}, onEdit }) {
+export default function ReconPanel({ rows = [], currency, logoUrls = {}, onEdit, onLogMissing }) {
   const [openMerchant, setOpenMerchant] = useState(null)
 
   const issues = useMemo(() => {
@@ -49,6 +55,7 @@ export default function ReconPanel({ rows = [], currency, logoUrls = {}, onEdit 
               merchant,
               from: prev.balance_date,
               to: r.balance_date,
+              missingDate: nextDayStr(prev.balance_date),
               days: gap - 1,
               row: r,
             })
@@ -152,6 +159,16 @@ export default function ReconPanel({ rows = [], currency, logoUrls = {}, onEdit 
                         {onEdit && issue.row && issue.type !== 'missing' && (
                           <button type="button" className="small secondary" onClick={() => onEdit(issue.row)}>
                             Edit
+                          </button>
+                        )}
+                        {onLogMissing && issue.type === 'missing' && issue.missingDate && (
+                          <button
+                            type="button"
+                            className="small secondary recon-log-btn"
+                            title={`Log entry for ${issue.merchant} on ${displayDate(issue.missingDate)}`}
+                            onClick={() => onLogMissing(issue.merchant, issue.missingDate)}
+                          >
+                            <Plus size={13} /> Log {displayDate(issue.missingDate)}
                           </button>
                         )}
                       </li>

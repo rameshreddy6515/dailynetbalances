@@ -8,6 +8,8 @@ import SummaryPanel from './components/SummaryPanel'
 import ChartsPanel from './components/ChartsPanel'
 import ConfirmDialog, { AccessibleDialog } from './components/ConfirmDialog'
 import Login from './components/Login'
+import { AppLockScreen, AppLockSettings } from './components/AppLock'
+import { LAST_EMAIL_KEY, REMEMBER_EMAIL_KEY, readAppLock, writeAppLock } from './appLockStore'
 import CommandPalette from './components/CommandPalette'
 import DashboardSettings from './components/DashboardSettings'
 import Select from './components/Select'
@@ -41,6 +43,7 @@ import {
   Landmark,
   List,
   ListOrdered,
+  Lock,
   LogOut,
   Moon,
   Percent,
@@ -74,6 +77,7 @@ const DEFAULT_ACCOUNT_PREFERENCES = {
   dateFmt: 'dmy',
   density: 'comfortable',
   textSize: 'normal',
+  bgStyle: 'mesh',
   highContrast: false,
   accent: 'indigo',
   chargeTypes: DEFAULT_TYPES,
@@ -114,6 +118,7 @@ function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENC
   const allowedDateFormats = ['dmy', 'mdy', 'iso']
   const allowedDensities = ['comfortable', 'compact']
   const allowedTextSizes = TEXT_SIZES.map(({ value }) => value)
+  const allowedBgStyles = BG_STYLES.map(({ value }) => value)
   const allowedAccents = ACCENTS.map(({ value: accent }) => accent)
   const allowedPresets = VISUAL_PRESETS.map(({ value }) => value)
   const validReminderTime = (time) => typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
@@ -130,6 +135,7 @@ function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENC
     dateFmt: allowedDateFormats.includes(source.dateFmt) ? source.dateFmt : fallback.dateFmt,
     density: allowedDensities.includes(source.density) ? source.density : fallback.density,
     textSize: allowedTextSizes.includes(source.textSize) ? source.textSize : fallback.textSize,
+    bgStyle: allowedBgStyles.includes(source.bgStyle) ? source.bgStyle : fallback.bgStyle,
     highContrast: typeof source.highContrast === 'boolean' ? source.highContrast : fallback.highContrast,
     accent: allowedAccents.includes(source.accent) ? source.accent : fallback.accent,
     chargeTypes: validChargeTypes(source.chargeTypes) ? source.chargeTypes : fallback.chargeTypes,
@@ -188,6 +194,11 @@ const TEXT_SIZES = [
   { value: 'normal', label: 'Normal' },
   { value: 'large', label: 'Large' },
   { value: 'xl', label: 'Extra large' },
+]
+const BG_STYLES = [
+  { value: 'mesh', label: 'Aurora Mesh' },
+  { value: 'dots', label: 'Dot Ledger' },
+  { value: 'minimal', label: 'Clean Minimal' },
 ]
 const NIGHT_START_HOUR = 19
 const NIGHT_END_HOUR = 7
@@ -279,6 +290,7 @@ export default function App() {
   const [dateFmt, setDateFmt] = useState(() => localStorage.getItem('datefmt') || 'dmy')
   const [density, setDensity] = useState(() => localStorage.getItem('density') || 'comfortable')
   const [textSize, setTextSize] = useState(() => localStorage.getItem('textSize') || 'normal')
+  const [bgStyle, setBgStyle] = useState(() => localStorage.getItem('bgStyle') || 'mesh')
   const [highContrast, setHighContrast] = useState(() => localStorage.getItem('highContrast') === '1')
   const [isNight, setIsNight] = useState(isNightNow)
   const settingsRestoreRef = useRef(null)
@@ -289,6 +301,8 @@ export default function App() {
   const [filters, setFilters] = useState({ merchant: '', from: '', to: '', tag: '' })
   const [editingRow, setEditingRow] = useState(null)
   const [selectMerchant, setSelectMerchant] = useState('')
+  const [selectDate, setSelectDate] = useState('')
+  const [quickLogBusy, setQuickLogBusy] = useState('')
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'system')
@@ -310,6 +324,23 @@ export default function App() {
   const [confirmState, setConfirmState] = useState(null)
   const [showMerchants, setShowMerchants] = useState(false)
   const [session, setSession] = useState(null)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
+  const [lockOverrides, setLockOverrides] = useState({})
+  const [unlockedUserId, setUnlockedUserId] = useState(null)
+  const hadSessionRef = useRef(false)
+  const hiddenAtRef = useRef(0)
+  const currentUserId = session?.user?.id || ''
+  const appLockCfg = currentUserId
+    ? (Object.prototype.hasOwnProperty.call(lockOverrides, currentUserId)
+      ? lockOverrides[currentUserId]
+      : readAppLock(currentUserId))
+    : null
+  const updateAppLock = useCallback((nextCfg) => {
+    if (!currentUserId) return
+    writeAppLock(currentUserId, nextCfg)
+    setLockOverrides((prev) => ({ ...prev, [currentUserId]: nextCfg }))
+    if (nextCfg) setUnlockedUserId(currentUserId)
+  }, [currentUserId])
   const merchantLogoUrls = useMemo(() => {
     if (!supabase) return {}
     return Object.fromEntries(Object.entries(merchantLogoPaths).map(([name, path]) => [
@@ -394,26 +425,21 @@ export default function App() {
   }, [dashCfg])
 
   useEffect(() => {
-    if (!supabase) {
-      setAuthReady(true)
-      return
-    }
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setAuthReady(true)
-    })
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s)
-      if (!s) {
-        setEntryOpen(false)
-        setWalletOpen(false)
-        setPreferencesReadyForUser(null)
-        setPreferencesSyncUserId(null)
-        setPreferencesMigrationUser(null)
+    const uid = session?.user?.id
+    if (!uid || !appLockCfg || appLockCfg.autoLock === 'reopen') return
+    const thresholdMs = appLockCfg.autoLock === '0' ? 3000 : Number(appLockCfg.autoLock) * 60000
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAtRef.current = Date.now()
+      } else if (hiddenAtRef.current > 0) {
+        const elapsed = Date.now() - hiddenAtRef.current
+        hiddenAtRef.current = 0
+        if (elapsed >= thresholdMs) setUnlockedUserId(null)
       }
-    })
-    return () => sub.subscription.unsubscribe()
-  }, [])
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [session?.user?.id, appLockCfg])
 
   useEffect(() => {
     if (!entryOpen) return
@@ -452,18 +478,20 @@ export default function App() {
     return () => document.removeEventListener('keydown', handleKey)
   }, [entryOpen, entryBusy, confirmState, paletteOpen, showMerchants, dashOpen])
 
-  const newEntry = (merchant = '') => {
+  const newEntry = (merchant = '', date = '') => {
     if (entryBusy) return
     setEntryKey((k) => k + 1)
     setEditingRow(null)
     setCopySource(null)
     setSelectMerchant(merchant)
+    setSelectDate(date)
     setEntryOpen(true)
   }
   const editRecord = (row) => {
     setEntryKey((k) => k + 1)
     setCopySource(null)
     setSelectMerchant('')
+    setSelectDate('')
     setEditingRow(row)
     setEntryOpen(true)
   }
@@ -582,6 +610,11 @@ export default function App() {
   }, [textSize])
 
   useEffect(() => {
+    document.documentElement.dataset.bg = bgStyle === 'mesh' ? '' : bgStyle
+    localStorage.setItem('bgStyle', bgStyle)
+  }, [bgStyle])
+
+  useEffect(() => {
     document.documentElement.dataset.contrast = highContrast ? 'high' : ''
     localStorage.setItem('highContrast', highContrast ? '1' : '0')
   }, [highContrast])
@@ -607,6 +640,73 @@ export default function App() {
     setPinnedMerchants((prev) => (prev.includes(name) ? prev.filter((m) => m !== name) : [...prev, name]))
   }, [])
 
+  const applyAccountPreferences = useCallback((preferences) => {
+    setTheme(preferences.theme)
+    setCurrency(preferences.currency)
+    setIndianFmt(preferences.indianFmt)
+    setDateFmt(preferences.dateFmt)
+    setDensity(preferences.density)
+    setTextSize(preferences.textSize)
+    setBgStyle(preferences.bgStyle)
+    setHighContrast(preferences.highContrast)
+    setAccent(preferences.accent)
+    setChargeTypes(preferences.chargeTypes)
+    setChargePresets(preferences.chargePresets)
+    setReminder(preferences.reminder)
+    setPinnedMerchants(preferences.pinnedMerchants)
+    setVisualPreset(preferences.visualPreset)
+    setDashCfg(preferences.dashConfig)
+  }, [])
+
+  const applyCachedPreferencesForUser = useCallback((userId) => {
+    if (!userId) return
+    try {
+      const cached = localStorage.getItem(`accountPreferences.v1.${userId}`)
+      if (cached) applyAccountPreferences(normalizeAccountPreferences(JSON.parse(cached)))
+    } catch {
+      // Malformed local cache is reported during background sync
+    }
+  }, [applyAccountPreferences])
+
+  useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true)
+      return
+    }
+    const rememberEmail = (addr) => {
+      if (addr && localStorage.getItem(REMEMBER_EMAIL_KEY) !== '0') {
+        localStorage.setItem(LAST_EMAIL_KEY, addr)
+      }
+    }
+    supabase.auth.getSession().then(({ data }) => {
+      hadSessionRef.current = Boolean(data.session)
+      rememberEmail(data.session?.user?.email)
+      applyCachedPreferencesForUser(data.session?.user?.id)
+      setSession(data.session)
+      setAuthReady(true)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === 'SIGNED_IN' && !hadSessionRef.current && s?.user?.id) {
+        setUnlockedUserId(s.user.id)
+      }
+      hadSessionRef.current = Boolean(s)
+      rememberEmail(s?.user?.email)
+      applyCachedPreferencesForUser(s?.user?.id)
+      setSession(s)
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
+      if (!s) {
+        setUnlockedUserId(null)
+        setPasswordRecovery(false)
+        setEntryOpen(false)
+        setWalletOpen(false)
+        setPreferencesReadyForUser(null)
+        setPreferencesSyncUserId(null)
+        setPreferencesMigrationUser(null)
+      }
+    })
+    return () => sub.subscription.unsubscribe()
+  }, [applyCachedPreferencesForUser])
+
   const accountPreferences = useMemo(() => ({
     theme,
     currency,
@@ -614,6 +714,7 @@ export default function App() {
     dateFmt,
     density,
     textSize,
+    bgStyle,
     highContrast,
     accent,
     chargeTypes,
@@ -622,7 +723,7 @@ export default function App() {
     pinnedMerchants,
     visualPreset,
     dashConfig: dashCfg,
-  }), [theme, currency, indianFmt, dateFmt, density, textSize, highContrast, accent, visualPreset, chargeTypes, chargePresets, reminder, pinnedMerchants, dashCfg])
+  }), [theme, currency, indianFmt, dateFmt, density, textSize, bgStyle, highContrast, accent, visualPreset, chargeTypes, chargePresets, reminder, pinnedMerchants, dashCfg])
   const accountPreferencesRef = useRef(accountPreferences)
   useEffect(() => {
     accountPreferencesRef.current = accountPreferences
@@ -644,22 +745,7 @@ export default function App() {
         return null
       }
     }
-    const applyPreferences = (preferences) => {
-      setTheme(preferences.theme)
-      setCurrency(preferences.currency)
-      setIndianFmt(preferences.indianFmt)
-      setDateFmt(preferences.dateFmt)
-      setDensity(preferences.density)
-      setTextSize(preferences.textSize)
-      setHighContrast(preferences.highContrast)
-      setAccent(preferences.accent)
-      setChargeTypes(preferences.chargeTypes)
-      setChargePresets(preferences.chargePresets)
-      setReminder(preferences.reminder)
-      setPinnedMerchants(preferences.pinnedMerchants)
-      setVisualPreset(preferences.visualPreset)
-      setDashCfg(preferences.dashConfig)
-    }
+    const applyPreferences = applyAccountPreferences
 
     const loadPreferences = async () => {
       const { data, error } = await supabase
@@ -729,7 +815,7 @@ export default function App() {
     return () => {
       active = false
     }
-  }, [session?.user?.id])
+  }, [session?.user?.id, applyAccountPreferences])
 
   useEffect(() => {
     const userId = session?.user?.id
@@ -1407,6 +1493,33 @@ export default function App() {
     return true
   }
 
+  const logUnchangedToday = async (merchantName, prevClosing) => {
+    if (!merchantName || quickLogBusy) return
+    const bal = toNumber(prevClosing)
+    const remainingAfter = pendingToday.length - 1
+    setQuickLogBusy(merchantName)
+    try {
+      const ok = await saveRecord(
+        {
+          merchant_name: merchantName,
+          balance_date: localToday(),
+          opening_balance: bal,
+          bank_amount: 0,
+          misc_expense: 0,
+          entry_type: 'daily',
+          closing_balance: bal,
+          tags: [],
+          notes: 'No change carried forward',
+        },
+        null,
+        true
+      )
+      if (ok && remainingAfter <= 0) setPendingOpen(false)
+    } finally {
+      setQuickLogBusy('')
+    }
+  }
+
   const deleteRecord = async (row) => {
     if (!supabase) return
     const ok = await askConfirm(`Delete the record for ${row.merchant_name} on ${row.balance_date}?`, {
@@ -1608,17 +1721,19 @@ export default function App() {
   )
 
   const sectionIds = new Set(['records', 'charts', 'leaderboard', 'recon'])
-  const navIds = new Set(['records', 'new', 'calc'])
+  const navIds = new Set(['records', 'wallet', 'new', 'analytics', 'calc'])
   const go = (id) => () => {
     const scrollTo = (target) => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth' })
     if (id === 'analytics') {
       setAnalyticsOpen(true)
+      setNavActive('analytics')
       requestAnimationFrame(() => requestAnimationFrame(() => scrollTo('analytics')))
       return
     }
     if (id === 'charts' || id === 'leaderboard' || id === 'recon') {
       setAnalyticsOpen(true)
       setSectionActive(id)
+      setNavActive('analytics')
       requestAnimationFrame(() => requestAnimationFrame(() => scrollTo(id)))
       return
     }
@@ -1688,6 +1803,9 @@ export default function App() {
       { group: 'Action', label: 'Customize dashboard', run: () => setDashOpen(true) },
       { group: 'Action', label: 'Toggle dark mode', run: () => applyTheme(dark ? 'light' : 'dark') },
       { group: 'Action', label: 'Print records', run: () => window.print() },
+      ...(appLockCfg
+        ? [{ group: 'Action', label: 'Lock app', run: () => setUnlockedUserId(null) }]
+        : []),
       ...(session && supabase
         ? [{ group: 'Action', label: 'Sign out', run: () => supabase.auth.signOut() }]
         : []),
@@ -1780,12 +1898,27 @@ export default function App() {
     ),
     leaderboard: (
       <div key="leaderboard" id="leaderboard">
-        <SummaryPanel records={visibleRecords} currency={currency} logoUrls={merchantLogoUrls} />
+        <SummaryPanel
+          records={visibleRecords}
+          currency={currency}
+          logoUrls={merchantLogoUrls}
+          activeMerchant={filters.merchant}
+          onSelectMerchant={(m) => {
+            setFilters((f) => ({ ...f, merchant: f.merchant === m ? '' : m }))
+            go('records')()
+          }}
+        />
       </div>
     ),
     recon: (
       <div key="recon" id="recon">
-        <ReconPanel rows={walletRows} currency={currency} logoUrls={merchantLogoUrls} onEdit={editRecord} />
+        <ReconPanel
+          rows={walletRows}
+          currency={currency}
+          logoUrls={merchantLogoUrls}
+          onEdit={editRecord}
+          onLogMissing={(merchant, date) => newEntry(merchant, date)}
+        />
       </div>
     ),
     records: (
@@ -1832,14 +1965,29 @@ export default function App() {
       </div>
     )
   }
-  if (supabase && !session) return <Login />
-  if (supabase && session && preferencesReadyForUser !== session.user.id) {
+  if (supabase && (!session || passwordRecovery)) {
     return (
-      <div className="wrap">
-        <div className="card">
-          <p>Loading your account preferences…</p>
-        </div>
-      </div>
+      <Login
+        dark={dark}
+        onToggleTheme={() => applyTheme(dark ? 'light' : 'dark')}
+        recovery={passwordRecovery}
+        onRecoveryDone={() => {
+          setPasswordRecovery(false)
+          notify('Password updated.', 'success')
+        }}
+      />
+    )
+  }
+  if (supabase && session && appLockCfg && unlockedUserId !== session.user.id) {
+    return (
+      <AppLockScreen
+        email={session.user?.email}
+        cfg={appLockCfg}
+        dark={dark}
+        onToggleTheme={() => applyTheme(dark ? 'light' : 'dark')}
+        onUnlock={() => setUnlockedUserId(session.user.id)}
+        onSignOut={() => supabase.auth.signOut()}
+      />
     )
   }
 
@@ -1900,6 +2048,11 @@ export default function App() {
                 <summary className="secondary"><MerchantAvatar name={session.user?.email || '?'} /> Account <ChevronDown size={14} /></summary>
                 <div className="menu-panel">
                   <span className="account-email">{session.user?.email}</span>
+                  {appLockCfg && (
+                    <button type="button" className="secondary" onClick={() => setUnlockedUserId(null)}>
+                      <Lock size={14} /> Lock app
+                    </button>
+                  )}
                   <button type="button" className="secondary" onClick={() => supabase.auth.signOut()}>
                     <LogOut size={14} /> Sign out
                   </button>
@@ -2074,6 +2227,28 @@ export default function App() {
                 <div className="wallet-amt-col">
                   <b>{fmt(row.closing_balance, currency)}</b>
                   {share > 0 && <span className="wallet-share-pct">{share < 1 ? '<1%' : `${share.toFixed(1)}%`}</span>}
+                  <div className="wallet-row-actions">
+                    {row.balance_date !== todayStr && (
+                      <button
+                        type="button"
+                        className="small primary"
+                        onClick={() => { setWalletOpen(false); newEntry(row.merchant_name) }}
+                      >
+                        <Plus size={12} /> Log today
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="small secondary"
+                      onClick={() => {
+                        setWalletOpen(false)
+                        setFilters((f) => ({ ...f, merchant: row.merchant_name }))
+                        go('records')()
+                      }}
+                    >
+                      History
+                    </button>
+                  </div>
                 </div>
               </li>
               )
@@ -2125,6 +2300,17 @@ export default function App() {
                         >
                           <Star size={14} />
                         </button>
+                        {last && (
+                          <button
+                            type="button"
+                            className="small secondary same-bal-btn"
+                            disabled={Boolean(quickLogBusy)}
+                            title={`Log ${fmt(last.closing_balance, currency)} with zero change today`}
+                            onClick={() => logUnchangedToday(m, last.closing_balance)}
+                          >
+                            {quickLogBusy === m ? 'Saving…' : 'Same balance'}
+                          </button>
+                        )}
                         <button type="button" className="small primary" onClick={() => { setPendingOpen(false); newEntry(m) }}>
                           <Plus size={14} /> Add entry
                         </button>
@@ -2244,27 +2430,59 @@ export default function App() {
           <BalanceForm key={entryKey} merchants={orderedMerchants} pinnedMerchants={pinnedMerchants}
             loggedByDate={loggedByDate} indianFmt={indianFmt} initialBalances={initialBalances}
             logoUrls={merchantLogoUrls} editingRow={editingRow} selectMerchant={selectMerchant}
-            copySource={copySource} currency={currency} onSubmit={saveRecord} onConfirm={askConfirm}
-            onCancelEdit={() => setEditingRow(null)} onClose={closeEntry} onBusyChange={setEntryBusy} />
+            selectDate={selectDate} copySource={copySource} currency={currency} onSubmit={saveRecord}
+            onConfirm={askConfirm} onCancelEdit={() => setEditingRow(null)} onClose={closeEntry}
+            onBusyChange={setEntryBusy} />
         </aside>
       </div>
 
-      <nav className="bottom-nav no-print" inert={entryOpen ? true : undefined}>
-        <button type="button" className={navActive === 'records' ? 'active' : ''} onClick={go('records')} aria-label="Records">
-          <List size={19} />
+      <nav className="bottom-nav no-print" inert={entryOpen ? true : undefined} aria-label="Quick navigation">
+        <button
+          type="button"
+          className={!walletOpen && !calcOpen && !chargeOpen && sectionActive === 'records' && navActive === 'records' ? 'active' : ''}
+          onClick={() => { setNavActive('records'); go('records')() }}
+          aria-label="Records"
+        >
+          <List size={18} />
           <span>Records</span>
         </button>
         <button
           type="button"
-          className={`bn-main${navActive === 'new' ? ' active' : ''}`}
+          className={walletOpen ? 'active' : ''}
+          onClick={() => { setNavActive('wallet'); setWalletOpen(true) }}
+          aria-label="Wallet breakdown"
+        >
+          <span className="bn-icon-wrap">
+            <Wallet size={18} />
+            {pendingToday.length > 0 && <span className="bn-dot" aria-hidden="true" />}
+          </span>
+          <span>Wallet</span>
+        </button>
+        <button
+          type="button"
+          className={`bn-main${entryOpen ? ' active' : ''}`}
           aria-label="New entry"
           onClick={() => { setNavActive('new'); newEntry() }}
         >
-          <Plus size={22} />
+          <Plus size={20} />
           <span>New</span>
         </button>
-        <button type="button" className={navActive === 'calc' ? 'active' : ''} onClick={() => { setNavActive('calc'); setCalcOpen(true) }} aria-label="Calculator">
-          <Calculator size={19} />
+        <button
+          type="button"
+          className={!walletOpen && !calcOpen && !chargeOpen && (navActive === 'analytics' || sectionActive !== 'records') ? 'active' : ''}
+          onClick={go('analytics')}
+          aria-label="Analytics"
+        >
+          <TrendingUp size={18} />
+          <span>Analytics</span>
+        </button>
+        <button
+          type="button"
+          className={calcOpen || chargeOpen ? 'active' : ''}
+          onClick={() => { setNavActive('calc'); setCalcOpen(true) }}
+          aria-label="Calculator"
+        >
+          <Calculator size={18} />
           <span>Calc</span>
         </button>
       </nav>
@@ -2327,6 +2545,16 @@ export default function App() {
                 onChange={(e) => setReminder((r) => ({ ...r, time: e.target.value }))} disabled={!reminder.enabled} />
             </div>
           </div>
+          {session && (
+            <AppLockSettings
+              email={session.user?.email}
+              cfg={appLockCfg}
+              onChange={updateAppLock}
+              onLockNow={() => { setSettingsOpen(false); setUnlockedUserId(null) }}
+              onConfirm={askConfirm}
+              notify={notify}
+            />
+          )}
           <div className="sheet-section">
             <h3>Display</h3>
             <div className="prefs-grid">
@@ -2372,6 +2600,9 @@ export default function App() {
                 <Select label="Accent color"
                   options={ACCENTS.map((a) => ({ value: a.value, label: a.label, node: <span className="merchant-cell"><span className="accent-dot" style={{ background: a.swatch }} />{a.label}</span> }))}
                   value={accent} onChange={applyAccent} />
+              </label>
+              <label>Background
+                <Select label="Background style" options={BG_STYLES} value={bgStyle} onChange={setBgStyle} />
               </label>
             </div>
             <div className="prefs-switch">

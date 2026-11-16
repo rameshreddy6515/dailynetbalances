@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, Check, Loader2, Plus, Save, Star } from 'lucide-react'
+import { ArrowRight, Check, CircleHelp, Loader2, Plus, Save, Star } from 'lucide-react'
 import { supabase } from '../supabase'
-import { amountToWords, evalMoneyExpr, fmt, localToday } from '../format'
+import { amountToWords, displayDate, evalMoneyExpr, fmt, localToday } from '../format'
 import Select from './Select'
 import DatePicker from './DatePicker'
 import MerchantAvatar from './MerchantAvatar'
@@ -28,10 +28,16 @@ const parseTags = (value) =>
     .map((t) => t.trim().toLowerCase().replace(/\s+/g, '-'))
     .filter(Boolean))]
 
-const loadDraft = () => {
+const loadDraft = (initialMerchant = '', initialDate = '') => {
+  if (initialMerchant || initialDate) {
+    return { ...blank(), merchant: initialMerchant || '', date: initialDate || localToday() }
+  }
   try {
     const draft = JSON.parse(localStorage.getItem(DRAFT_KEY))
-    return draft ? { ...blank(), ...draft, date: localToday(), merchant: '' } : blank()
+    if (draft && draft.merchant && draft.date === localToday()) {
+      return { ...blank(), ...draft }
+    }
+    return blank()
   } catch {
     return blank()
   }
@@ -49,32 +55,35 @@ const NumInput = ({ value, onChange, required, currency, indianFmt, showWords = 
   const words = showWords && parsed.value > 0 ? amountToWords(parsed.value, indianFmt) : ''
   return (
     <>
-      <input
-        type="text"
-        inputMode="decimal"
-        autoComplete="off"
-        placeholder="0.00 or 1200+350"
-        value={value}
-        onChange={(e) => {
-          const raw = e.target.value
-          if (raw.endsWith('=')) {
-            const next = evalMoneyExpr(raw)
-            if (next.valid) {
-              onChange(formatEvaluated(next.value))
-              return
+      <span className="money-field">
+        {currency && <span className="money-prefix" aria-hidden="true">{currency}</span>}
+        <input
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder="0.00"
+          value={value}
+          onChange={(e) => {
+            const raw = e.target.value
+            if (raw.endsWith('=')) {
+              const next = evalMoneyExpr(raw)
+              if (next.valid) {
+                onChange(formatEvaluated(next.value))
+                return
+              }
             }
-          }
-          onChange(raw)
-        }}
-        onBlur={commitExpr}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && parsed.isExpr && parsed.valid) {
-            e.preventDefault()
-            commitExpr()
-          }
-        }}
-        required={required}
-      />
+            onChange(raw)
+          }}
+          onBlur={commitExpr}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && parsed.isExpr && parsed.valid) {
+              e.preventDefault()
+              commitExpr()
+            }
+          }}
+          required={required}
+        />
+      </span>
       {parsed.isExpr && parsed.valid && (
         <span className="math-preview">= {fmt(parsed.value, currency)}</span>
       )}
@@ -92,6 +101,7 @@ export default function BalanceForm({
   logoUrls = {},
   editingRow,
   selectMerchant,
+  selectDate,
   copySource,
   currency,
   onSubmit,
@@ -100,14 +110,16 @@ export default function BalanceForm({
   onClose,
   onBusyChange,
 }) {
-  const [form, setForm] = useState(loadDraft)
+  const [form, setForm] = useState(() => loadDraft(selectMerchant, selectDate))
   const [openingSource, setOpeningSource] = useState(null)
   const [closingAuto, setClosingAuto] = useState(false)
+  const [formulaOpen, setFormulaOpen] = useState(false)
   const [prefillTick, setPrefillTick] = useState(0)
   const [saving, setSaving] = useState(false)
   const [flash, setFlash] = useState(false)
   const [validation, setValidation] = useState('')
   const formRef = useRef(null)
+  const jumpRowRef = useRef(null)
   const closingTouched = useRef(false)
   const previousEditing = useRef(editingRow)
 
@@ -139,15 +151,17 @@ export default function BalanceForm({
   }, [editingRow])
 
   useEffect(() => {
-    if (!selectMerchant) return
+    if (!selectMerchant && !selectDate) return
     setOpeningSource(null)
     setClosingAuto(false)
     setForm((f) => {
-      if (f.merchant === selectMerchant) return f
+      const nextMerchant = selectMerchant || f.merchant
+      const nextDate = selectDate || f.date
+      if (f.merchant === nextMerchant && f.date === nextDate) return f
       closingTouched.current = false
-      return { ...f, merchant: selectMerchant, opening: '', closing: '', bank: '', misc: '' }
+      return { ...f, merchant: nextMerchant, date: nextDate, opening: '', closing: '', bank: '', misc: '' }
     })
-  }, [selectMerchant])
+  }, [selectMerchant, selectDate])
 
   useEffect(() => {
     if (!copySource) return
@@ -170,6 +184,10 @@ export default function BalanceForm({
 
   useEffect(() => {
     if (editingRow) return
+    if (!form.merchant && !form.bank && !form.misc && !form.notes && !form.tags) {
+      localStorage.removeItem(DRAFT_KEY)
+      return
+    }
     localStorage.setItem(DRAFT_KEY, JSON.stringify(form))
   }, [form, editingRow])
 
@@ -218,6 +236,12 @@ export default function BalanceForm({
     }
   }, [form.merchant, form.date, editingRow, copySource, prefillTick, initialBalances])
 
+  useEffect(() => {
+    jumpRowRef.current
+      ?.querySelector('.merchant-chip.active')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }, [form.merchant])
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
   const opening = toNumber(form.opening)
@@ -236,7 +260,31 @@ export default function BalanceForm({
   const orderedAfter = curIdx >= 0
     ? [...merchants.slice(curIdx + 1), ...merchants.slice(0, curIdx)]
     : merchants
-  const nextPending = orderedAfter.find((m) => m !== form.merchant && !(loggedSet && loggedSet.has(m))) || ''
+  const nextPending = form.merchant
+    ? orderedAfter.find((m) => m !== form.merchant && !(loggedSet && loggedSet.has(m))) || ''
+    : ''
+  const pendingChips = merchants.filter((m) => !(loggedSet && loggedSet.has(m)))
+  const dateLabel = form.date === localToday() ? 'today' : (form.date ? displayDate(form.date) : 'the selected date')
+
+  const switchMerchant = async (v) => {
+    if (!v || v === form.merchant) return
+    const hasTypedAmounts =
+      closingTouched.current ||
+      toNumber(form.bank) !== 0 ||
+      toNumber(form.misc) !== 0 ||
+      (form.opening !== '' && !openingSource)
+    if (hasTypedAmounts && onConfirm) {
+      const ok = await onConfirm(
+        `Switch to "${v}"? The amounts you entered for ${form.merchant ? `"${form.merchant}"` : 'this entry'} will be cleared.`,
+        { confirmLabel: 'Switch' }
+      )
+      if (!ok) return
+    }
+    closingTouched.current = false
+    setOpeningSource(null)
+    setClosingAuto(false)
+    setForm((f) => ({ ...f, merchant: v, opening: '', closing: '', bank: '', misc: '' }))
+  }
 
   const resetForm = (keepMerchant = true) => {
     closingTouched.current = false
@@ -293,7 +341,7 @@ export default function BalanceForm({
           localStorage.removeItem(DRAFT_KEY)
           formRef.current?.querySelector('.select-btn')?.focus()
         } else {
-          resetForm()
+          resetForm(false)
         }
         setPrefillTick((t) => t + 1)
         setFlash(true)
@@ -307,6 +355,31 @@ export default function BalanceForm({
   return (
     <form ref={formRef} onSubmit={handleSubmit} aria-label="Balance entry" aria-busy={saving}>
       {validation && <p className="message error" role="alert">{validation}</p>}
+      {!editingRow && !copySource && merchants.length > 0 && (
+        pendingChips.length ? (
+          <div className="merchant-jump" role="group" aria-label="Pending merchants">
+            <span className="merchant-jump-label">
+              Pending {dateLabel} · {pendingChips.length} left
+            </span>
+            <div className="merchant-jump-row" ref={jumpRowRef}>
+              {pendingChips.map((m) => (
+                <button key={m} type="button"
+                  className={`merchant-chip${m === form.merchant ? ' active' : ''}`}
+                  title={`Switch to ${m}`}
+                  onClick={() => switchMerchant(m)}>
+                  <MerchantAvatar name={m} logoUrl={logoUrls[m]} />
+                  <span className="merchant-chip-name">{m}</span>
+                  {pinnedSet.has(m) && <Star size={10} className="pin-star" aria-hidden="true" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="merchant-jump done">
+            <Check size={13} aria-hidden="true" /> All {merchants.length} merchant{merchants.length === 1 ? '' : 's'} logged {dateLabel === 'today' ? 'today' : `for ${dateLabel}`}.
+          </p>
+        )
+      )}
       <div className="grid">
         <label>
           Merchant name
@@ -328,13 +401,7 @@ export default function BalanceForm({
                 : []),
             ]}
             value={form.merchant}
-            onChange={(v) => {
-              if (v === form.merchant) return
-              closingTouched.current = false
-              setOpeningSource(null)
-              setClosingAuto(false)
-              setForm((f) => ({ ...f, merchant: v, opening: '', closing: '', bank: '', misc: '' }))
-            }}
+            onChange={switchMerchant}
             placeholder="Select a merchant"
             searchable
           />
@@ -360,7 +427,11 @@ export default function BalanceForm({
         </label>
       </div>
 
-      <div className="grid grid-tight">
+      <div className="money-grid-head">
+        <span>Amounts</span>
+        <span className="math-tip">Inline math supported (e.g. 1200+350)</span>
+      </div>
+      <div className="grid grid-tight money-grid">
         <label>
           Opening balance
           <NumInput
@@ -414,8 +485,10 @@ export default function BalanceForm({
           />
         </label>
 
-        <label>
-          Closing balance
+        <label className="closing-field">
+          <span className="closing-label">
+            Closing balance <span className="closing-pill">Actual EOD</span>
+          </span>
           <NumInput
             value={form.closing}
             currency={currency}
@@ -433,38 +506,59 @@ export default function BalanceForm({
       </div>
 
       <div className="calc">
-        Net change:{' '}
-        <b className={todayChange >= 0 ? 'pos' : 'neg'}>
-          {todayChange >= 0 ? '+' : '−'}{fmt(Math.abs(todayChange), currency)}
-        </b>
-        {form.closing !== '' && todayChange < -0.004 && (
-          <span className="calc-moves">
-            <button
-              type="button"
-              className="small secondary misc-move"
-              data-tip="Record the missing amount as moved to bank"
-              onClick={() =>
-                setForm((f) => ({ ...f, bank: (toNumber(f.bank) + Math.abs(todayChange)).toFixed(2) }))
-              }
-            >
-              Move {fmt(Math.abs(todayChange), currency)} to Bank
-            </button>
-            <button
-              type="button"
-              className="small secondary misc-move"
-              data-tip="Record the missing amount as a miscellaneous expense"
-              onClick={() =>
-                setForm((f) => ({ ...f, misc: (toNumber(f.misc) + Math.abs(todayChange)).toFixed(2) }))
-              }
-            >
-              Move {fmt(Math.abs(todayChange), currency)} to Misc
-            </button>
-          </span>
-        )}
+        <div className="calc-head">
+          <div>
+            Net change:{' '}
+            <b className={todayChange >= 0 ? 'pos' : 'neg'}>
+              {todayChange >= 0 ? '+' : '−'}{fmt(Math.abs(todayChange), currency)}
+            </b>
+            {form.closing !== '' && todayChange < -0.004 && (
+              <span className="calc-moves">
+                <button
+                  type="button"
+                  className="small secondary misc-move"
+                  data-tip="Record the missing amount as moved to bank"
+                  onClick={() =>
+                    setForm((f) => ({ ...f, bank: (toNumber(f.bank) + Math.abs(todayChange)).toFixed(2) }))
+                  }
+                >
+                  Move {fmt(Math.abs(todayChange), currency)} to Bank
+                </button>
+                <button
+                  type="button"
+                  className="small secondary misc-move"
+                  data-tip="Record the missing amount as a miscellaneous expense"
+                  onClick={() =>
+                    setForm((f) => ({ ...f, misc: (toNumber(f.misc) + Math.abs(todayChange)).toFixed(2) }))
+                  }
+                >
+                  Move {fmt(Math.abs(todayChange), currency)} to Misc
+                </button>
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="calc-help-btn"
+            aria-expanded={formulaOpen}
+            aria-label="How is net change calculated?"
+            title="How is net change calculated?"
+            onClick={() => setFormulaOpen((o) => !o)}
+          >
+            <CircleHelp size={15} />
+          </button>
+        </div>
         <div className="muted">
           Expected closing {fmt(expectedClosing, currency)} · Wallet change (Closing − Opening):{' '}
           {walletChange >= 0 ? '+' : '−'}{fmt(Math.abs(walletChange), currency)}
         </div>
+        {formulaOpen && (
+          <p className="calc-formula-note">
+            <code>today change = closing − opening + move to bank + misc expense</code>. Moving money to bank
+            lowers the wallet and next opening automatically; bank moves and misc are added back so transfers
+            aren&apos;t counted as loss.
+          </p>
+        )}
       </div>
 
       <label>
@@ -499,54 +593,48 @@ export default function BalanceForm({
 
       <label>
         Notes
-        <textarea value={form.notes} onChange={set('notes')} placeholder="Optional remarks" />
+        <textarea rows={2} value={form.notes} onChange={set('notes')} placeholder="Optional remarks" />
       </label>
 
       <div className="actions entry-form-actions">
-        <button type="submit" disabled={saving} className={flash ? 'btn-saved' : ''}>
-          {saving ? (
-            <>
-              <Loader2 size={15} className="spin" /> Saving…
-            </>
-          ) : flash ? (
-            <>
-              <Check size={15} /> Saved!
-            </>
-          ) : (
-            <>
-              <Save size={15} /> {editingRow ? 'Update Entry' : 'Save Entry'}
-            </>
+        <div className="entry-save-group">
+          <button type="submit" disabled={saving} className={`primary ${flash ? 'btn-saved' : ''}`}>
+            {saving ? (
+              <>
+                <Loader2 size={15} className="spin" /> Saving…
+              </>
+            ) : flash ? (
+              <>
+                <Check size={15} /> Saved!
+              </>
+            ) : (
+              <>
+                <Save size={15} /> {editingRow ? 'Update Entry' : 'Save Entry'}
+              </>
+            )}
+          </button>
+          {!editingRow && nextPending && (
+            <button type="submit" name="saveMode" value="nextPending" className="secondary save-next-btn" disabled={saving}
+              title={`Save and switch to ${nextPending}`}>
+              <ArrowRight size={15} /> <span className="btn-ellipsis">Next: {nextPending}</span>
+            </button>
           )}
-        </button>
-        {!editingRow && nextPending && (
-          <button type="submit" name="saveMode" value="nextPending" className="secondary save-next-btn" disabled={saving}
-            data-tip={`Save and switch to ${nextPending}`}>
-            <ArrowRight size={15} /> Save & next ({nextPending})
+          {!editingRow && (
+            <button type="submit" name="saveMode" value="another" className="secondary save-another-btn" disabled={saving}
+              title="Save and keep the panel open for another entry">
+              <Plus size={15} /> <span>Add another</span>
+            </button>
+          )}
+        </div>
+        <div className="entry-dismiss-group">
+          <button type="button" className="secondary" disabled={saving} onClick={() => { resetForm(false); onCancelEdit() }}>
+            Reset
           </button>
-        )}
-        {!editingRow && (
-          <button type="submit" name="saveMode" value="another" className="secondary" disabled={saving}
-            data-tip="Save and keep the panel open for the next merchant">
-            <Plus size={15} /> Save & add another
+          <button type="button" className="secondary" disabled={saving} onClick={onClose || onCancelEdit}>
+            Cancel
           </button>
-        )}
-        <button type="button" className="secondary" disabled={saving} onClick={onClose || onCancelEdit}>
-          Cancel
-        </button>
-        <button type="button" className="secondary" disabled={saving} onClick={() => { resetForm(false); onCancelEdit() }}>
-          Reset
-        </button>
+        </div>
       </div>
-
-      <details className="hint">
-        <summary>How is net change calculated?</summary>
-        <p>
-          <code>today change = closing balance − opening balance + move to bank + misc expense</code>.
-          Entering a Move to Bank amount lowers the closing balance automatically, so the wallet drops and
-          the next opening starts lower — money moved to bank and misc expense are added back because they
-          only moved money, they are not profit or loss.
-        </p>
-      </details>
     </form>
   )
 }

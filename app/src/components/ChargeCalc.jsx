@@ -38,7 +38,7 @@ export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = 
       <div className="seg-group charge-mode-toggle" role="group" aria-label="Calculation direction">
         <button
           type="button"
-          className={`seg-btn${!isReverse ? ' active' : ''}`}
+          className={`seg-btn${!isReverse ? ' on' : ''}`}
           aria-pressed={!isReverse}
           onClick={() => setMode('forward')}
         >
@@ -46,7 +46,7 @@ export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = 
         </button>
         <button
           type="button"
-          className={`seg-btn${isReverse ? ' active' : ''}`}
+          className={`seg-btn${isReverse ? ' on' : ''}`}
           aria-pressed={isReverse}
           onClick={() => setMode('reverse')}
         >
