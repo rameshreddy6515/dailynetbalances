@@ -5,11 +5,15 @@ import { evalMoneyExpr, fmt, toNumber } from '../format'
 
 import { DEFAULT_PCTS, DEFAULT_TYPES } from '../chargeData'
 
+const TRANSFER_FEE = 30
+const TRANSFER_OPTIONS = [0, 1, 2, 3, 4]
+
 export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = DEFAULT_PCTS }) {
   const [mode, setMode] = useState('forward')
   const [amount, setAmount] = useState('')
   const [typeName, setTypeName] = useState(() => localStorage.getItem('chargeTypeLast') || '')
   const [sel, setSel] = useState('')
+  const [transfers, setTransfers] = useState(() => localStorage.getItem('transferCount') || '0')
   const [reveal, setReveal] = useState(false)
 
   useEffect(() => {
@@ -22,13 +26,15 @@ export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = 
   const rate = toNumber(sel)
   const isReverse = mode === 'reverse'
   const invalidRate = isReverse && rate >= 100
+  const transferCount = toNumber(transfers)
+  const transferCharges = transferCount * TRANSFER_FEE
   const swipeAmt = isReverse
-    ? (invalidRate ? 0 : rate > 0 ? inputAmt / (1 - rate / 100) : inputAmt)
+    ? (invalidRate ? 0 : rate > 0 ? (inputAmt + transferCharges) / (1 - rate / 100) : inputAmt + transferCharges)
     : inputAmt
-  const charges = isReverse ? swipeAmt - inputAmt : (swipeAmt * rate) / 100
+  const charges = (swipeAmt * rate) / 100
   const pct = String(types.find(([n]) => n === typeName)?.[1] ?? '')
   const pctAmt = (swipeAmt * toNumber(pct)) / 100
-  const ccAmt = swipeAmt - charges
+  const ccAmt = swipeAmt - charges - transferCharges
   const primaryOut = isReverse ? swipeAmt : ccAmt
   const primaryLabel = isReverse ? 'Required Swipe Amount' : 'Final CC Amount'
   const finalAmt = charges - pctAmt
@@ -108,6 +114,27 @@ export default function ChargeCalc({ currency, types = DEFAULT_TYPES, presets = 
         />
       </fieldset>
       {invalidRate && <p className="message error" role="alert">Charge rate must be below 100% in reverse mode.</p>}
+      <label>
+        <span>
+          Transfers
+          <span className="charge-info" data-tip={`${fmt(TRANSFER_FEE, currency)} per transfer`} tabIndex={0} role="img" aria-label={`${fmt(TRANSFER_FEE, currency)} per transfer`}>
+            <Info size={13} />
+          </span>
+        </span>
+        <Select
+          label="Number of bank transfers"
+          options={TRANSFER_OPTIONS.map((n) => ({
+            value: String(n),
+            label: n === 0 ? 'None' : `${n} transfer${n === 1 ? '' : 's'} — ${fmt(n * TRANSFER_FEE, currency)}`,
+          }))}
+          value={transfers}
+          onChange={(v) => { setTransfers(v); localStorage.setItem('transferCount', v) }}
+        />
+      </label>
+      <label>
+        Transfer Charges
+        <input key={fmt(transferCharges, currency)} type="text" readOnly value={fmt(transferCharges, currency)} aria-label="Transfer charges (calculated)" />
+      </label>
       <label>
         Merchant Charges
         <input key={fmt(charges, currency)} type="text" readOnly value={fmt(charges, currency)} aria-label="Merchant charges (calculated)" />

@@ -2341,7 +2341,7 @@ export default function App() {
         <AccessibleDialog title="Charge calculator" className="calc-dialog" persistent onClose={() => setChargeOpen(false)}>
           <details className="hint">
             <summary>How is this calculated?</summary>
-            <p>Merchant charges = Amount × charge rate. Final CC amount = Amount − charge rate amount. Retailer misc charges = charge rate amount − merchant type amount.</p>
+            <p>Merchant charges = Amount × charge rate. Transfer charges = ₹30 per transfer. Final CC amount = Amount − charge rate amount − transfer charges. Retailer misc charges = charge rate amount − merchant type amount.</p>
           </details>
           <ChargeCalc currency={currency} types={chargeTypes} presets={chargePresets} />
           <div className="calc-swap">
