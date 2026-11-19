@@ -6,6 +6,9 @@ import RecordsTable from './components/RecordsTable'
 import ReconPanel from './components/ReconPanel'
 import SummaryPanel from './components/SummaryPanel'
 import ChartsPanel from './components/ChartsPanel'
+import DailyBriefing from './components/DailyBriefing'
+import BatchGridModal from './components/BatchGridModal'
+import ShareReminderStatus from './components/ShareReminderStatus'
 import ConfirmDialog, { AccessibleDialog } from './components/ConfirmDialog'
 import Login from './components/Login'
 import { AppLockScreen, AppLockSettings } from './components/AppLock'
@@ -30,6 +33,8 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  Eye,
+  EyeOff,
   Calculator,
   CheckCircle2,
   ChevronDown,
@@ -51,9 +56,11 @@ import {
   RefreshCw,
   Settings,
   SlidersHorizontal,
+  Smartphone,
   Star,
   Store,
   Sun,
+  Table2,
   Trash2,
   Upload,
   Wallet,
@@ -83,6 +90,7 @@ const DEFAULT_ACCOUNT_PREFERENCES = {
   chargeTypes: DEFAULT_TYPES,
   chargePresets: DEFAULT_PCTS,
   reminder: { enabled: false, time: '21:00' },
+  eodShare: { enabled: false, times: ['21:30'], phone: '' },
   pinnedMerchants: [],
   visualPreset: 'custom',
   dashConfig: DEFAULT_CFG,
@@ -112,6 +120,13 @@ function normalizeDashboardConfig(value, fallback = DEFAULT_CFG) {
   }
 }
 
+const normalizeWaPhone = (v) => (typeof v === 'string' ? v.replace(/\D/g, '').slice(0, 15) : '')
+const normalizeWaTimes = (v, fallbackTimes = ['21:30']) => {
+  const list = Array.isArray(v) ? v : typeof v === 'string' && v ? [v] : []
+  const times = [...new Set(list.filter((t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)))].slice(0, 4)
+  return times.length ? times : [...fallbackTimes]
+}
+
 function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENCES) {
   const source = value && typeof value === 'object' ? value : {}
   const allowedThemes = ['system', 'night', 'light', 'dark', 'black']
@@ -127,6 +142,7 @@ function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENC
   const validChargePresets = (presets) => Array.isArray(presets) && presets.length > 0 &&
     presets.every((preset) => Number.isFinite(Number(preset)))
   const reminder = source.reminder && typeof source.reminder === 'object' ? source.reminder : {}
+  const eodShare = source.eodShare && typeof source.eodShare === 'object' ? source.eodShare : {}
 
   return {
     theme: allowedThemes.includes(source.theme) ? source.theme : fallback.theme,
@@ -143,6 +159,11 @@ function normalizeAccountPreferences(value, fallback = DEFAULT_ACCOUNT_PREFERENC
     reminder: {
       enabled: typeof reminder.enabled === 'boolean' ? reminder.enabled : fallback.reminder.enabled,
       time: validReminderTime(reminder.time) ? reminder.time : fallback.reminder.time,
+    },
+    eodShare: {
+      enabled: typeof eodShare.enabled === 'boolean' ? eodShare.enabled : fallback.eodShare.enabled,
+      times: normalizeWaTimes(eodShare.times ?? eodShare.time, fallback.eodShare.times),
+      phone: normalizeWaPhone(eodShare.phone),
     },
     pinnedMerchants: Array.isArray(source.pinnedMerchants)
       ? [...new Set(source.pinnedMerchants.filter((m) => typeof m === 'string' && m.trim()))]
@@ -266,7 +287,16 @@ export default function App() {
   const [records, setRecords] = useState([])
   const [walletRows, setWalletRows] = useState([])
   const [walletOpen, setWalletOpen] = useState(false)
+  const [counterPrivate, setCounterPrivate] = useState(() => sessionStorage.getItem('counterPrivate') === 'yes')
+  const togglePrivacy = () => {
+    sessionStorage.setItem('counterPrivate', counterPrivate ? 'no' : 'yes')
+    setCounterPrivate(!counterPrivate)
+  }
   const [pendingOpen, setPendingOpen] = useState(false)
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchPending, setBatchPending] = useState(false)
+  const [chooseEntry, setChooseEntry] = useState(false)
+  const [batchDate, setBatchDate] = useState('')
   const [calcOpen, setCalcOpen] = useState(false)
   const [chargeOpen, setChargeOpen] = useState(false)
   const [typesOpen, setTypesOpen] = useState(false)
@@ -498,6 +528,11 @@ export default function App() {
   const closeEntry = () => {
     if (!entryBusy) setEntryOpen(false)
   }
+  const openBatchGrid = (dateStr = '', pending = false) => {
+    setBatchPending(pending)
+    setBatchDate(dateStr || '')
+    setBatchOpen(true)
+  }
 
   useEffect(() => {
     const closeMenus = (e) => {
@@ -519,10 +554,10 @@ export default function App() {
     }
   }, [])
 
-  const notify = (text, type = 'info', action = null) => {
+  const notify = useCallback((text, type = 'info', action = null) => {
     const id = Date.now() + Math.random()
     setToasts((t) => [...t, { id, text, type, action, duration: action ? 7000 : 4500 }])
-  }
+  }, [])
   const dismissToast = (id) => setToasts((t) => t.filter((x) => x.id !== id))
 
   const askConfirm = (message, options = {}) =>
@@ -550,6 +585,7 @@ export default function App() {
         [dashOpen, () => setDashOpen(false)],
         [paletteOpen, () => setPaletteOpen(false)],
         [pendingOpen, () => setPendingOpen(false)],
+        [chooseEntry, () => setChooseEntry(false)],
       ]
       for (const [open, close] of closers) {
         if (open) { close(); return }
@@ -625,6 +661,31 @@ export default function App() {
       return { enabled: false, time: '21:00' }
     }
   })
+  const [eodShare, setEodShare] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('eodShare'))
+      if (s && typeof s === 'object') {
+        return { enabled: Boolean(s.enabled), times: normalizeWaTimes(s.times ?? s.time), phone: normalizeWaPhone(s.phone) }
+      }
+    } catch { /* fall through */ }
+    return { enabled: false, times: ['21:30'], phone: '' }
+  })
+  useEffect(() => {
+    localStorage.setItem('eodShare', JSON.stringify(eodShare))
+  }, [eodShare])
+  const [deviceId] = useState(() => {
+    try {
+      let id = localStorage.getItem('presenceDeviceId')
+      if (!id) {
+        id = crypto.randomUUID()
+        localStorage.setItem('presenceDeviceId', id)
+      }
+      return id
+    } catch {
+      return `device-${Math.random().toString(36).slice(2)}`
+    }
+  })
+  const [presenceCount, setPresenceCount] = useState(0)
   const [pinnedMerchants, setPinnedMerchants] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('pinnedMerchants'))
@@ -653,6 +714,7 @@ export default function App() {
     setChargeTypes(preferences.chargeTypes)
     setChargePresets(preferences.chargePresets)
     setReminder(preferences.reminder)
+    setEodShare(preferences.eodShare)
     setPinnedMerchants(preferences.pinnedMerchants)
     setVisualPreset(preferences.visualPreset)
     setDashCfg(preferences.dashConfig)
@@ -720,10 +782,11 @@ export default function App() {
     chargeTypes,
     chargePresets,
     reminder,
+    eodShare,
     pinnedMerchants,
     visualPreset,
     dashConfig: dashCfg,
-  }), [theme, currency, indianFmt, dateFmt, density, textSize, bgStyle, highContrast, accent, visualPreset, chargeTypes, chargePresets, reminder, pinnedMerchants, dashCfg])
+  }), [theme, currency, indianFmt, dateFmt, density, textSize, bgStyle, highContrast, accent, visualPreset, chargeTypes, chargePresets, reminder, eodShare, pinnedMerchants, dashCfg])
   const accountPreferencesRef = useRef(accountPreferences)
   useEffect(() => {
     accountPreferencesRef.current = accountPreferences
@@ -907,7 +970,7 @@ export default function App() {
     const id = setInterval(check, 60000)
     check()
     return () => clearInterval(id)
-  }, [reminder, session, merchants, walletRows])
+  }, [reminder, session, merchants, walletRows, notify])
 
   const toggleReminder = async (enabled) => {
     if (enabled && 'Notification' in window && Notification.permission === 'default') {
@@ -990,7 +1053,7 @@ export default function App() {
     registerSW((activate) =>
       notify('A new version of the app is available.', 'info', { label: 'Refresh', fn: activate })
     )
-  }, [])
+  }, [notify])
 
   const loadMerchants = useCallback(async () => {
     if (!supabase || !session) return
@@ -1113,6 +1176,7 @@ export default function App() {
         target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
       )
     const h = (e) => {
+      if (counterPrivate) return
       const key = e.key.toLowerCase()
       if ((e.ctrlKey || e.metaKey) && key === 'k') {
         e.preventDefault()
@@ -1158,11 +1222,18 @@ export default function App() {
       if (key === 'c') {
         e.preventDefault()
         setCalcOpen(true)
+        return
+      }
+      if (key === 'b') {
+        e.preventDefault()
+        setBatchDate('')
+        setBatchPending(false)
+        setBatchOpen(true)
       }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [entryBusy, filters, loadRecords])
+  }, [counterPrivate, entryBusy, filters, loadRecords])
 
   useEffect(() => {
     loadMerchants()
@@ -1493,6 +1564,74 @@ export default function App() {
     return true
   }
 
+  const saveBatchRecords = async (inserts, updates, dateStr) => {
+    if (!supabase) {
+      setStatus({ type: 'error', text: 'Supabase is not configured. Check the .env file.' })
+      notify('Supabase is not configured.', 'error')
+      return false
+    }
+
+    const stripCols = (item, cols) => {
+      const copy = { ...item }
+      for (const c of cols) delete copy[c]
+      return copy
+    }
+
+    const dropped = new Set()
+    let lastSavedId = null
+
+    if (inserts.length > 0) {
+      let rowsToInsert = inserts.map((r) => ({ ...r }))
+      let res = await supabase.from('daily_balances').insert(rowsToInsert).select('id')
+      for (const col of OPTIONAL_COLS) {
+        if (res.error && (res.error.message || '').includes(col)) {
+          dropped.add(col)
+          rowsToInsert = rowsToInsert.map((r) => stripCols(r, [col]))
+          res = await supabase.from('daily_balances').insert(rowsToInsert).select('id')
+        }
+      }
+      if (res.error) {
+        setStatus({ type: 'error', text: res.error.message })
+        notify(`Could not save batch entries: ${res.error.message}`, 'error')
+        return false
+      }
+      lastSavedId = res.data?.[res.data.length - 1]?.id || lastSavedId
+    }
+
+    for (const u of updates) {
+      let payload = stripCols(u.payload, [...dropped])
+      let res = await supabase.from('daily_balances').update(payload).eq('id', u.id).select('id')
+      for (const col of OPTIONAL_COLS) {
+        if (res.error && (res.error.message || '').includes(col)) {
+          dropped.add(col)
+          payload = stripCols(payload, [col])
+          res = await supabase.from('daily_balances').update(payload).eq('id', u.id).select('id')
+        }
+      }
+      if (res.error) {
+        setStatus({ type: 'error', text: res.error.message })
+        notify(`Could not update ${u.payload.merchant_name}: ${res.error.message}`, 'error')
+        await Promise.all([loadRecords(filters), loadWallet()])
+        return false
+      }
+      lastSavedId = u.id
+    }
+
+    const parts = []
+    if (inserts.length) parts.push(`${inserts.length} new ${inserts.length === 1 ? 'entry' : 'entries'}`)
+    if (updates.length) parts.push(`${updates.length} updated`)
+    const summaryText = `Batch saved (${parts.join(', ')}) for ${displayDate(dateStr)}.`
+    setStatus({ type: 'success', text: summaryText })
+    notify(summaryText, 'success')
+    navigator.vibrate?.(40)
+    if (lastSavedId) {
+      setFlashId(lastSavedId)
+      setTimeout(() => setFlashId(null), 2500)
+    }
+    await Promise.all([loadRecords(filters), loadWallet()])
+    return true
+  }
+
   const logUnchangedToday = async (merchantName, prevClosing) => {
     if (!merchantName || quickLogBusy) return
     const bal = toNumber(prevClosing)
@@ -1705,6 +1844,34 @@ export default function App() {
     return { total, todayChange, yesterdayChange, hasYesterday, entries, bankByMerchant, bankTotal }
   }, [walletRows])
 
+  const forecast = useMemo(() => {
+    const [fy, fm, fd] = localDay(1).split('-').map(Number)
+    const dow = (Math.floor(Date.UTC(fy, fm - 1, fd) / 86400000) + 4) % 7 // epoch fell on a Thursday
+    const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dow]
+    const sums = {}
+    for (const r of walletRows) {
+      const [ry, rm, rd] = String(r.balance_date || '').split('-').map(Number)
+      if (!ry || !rm || !rd) continue
+      const d = (Math.floor(Date.UTC(ry, rm - 1, rd) / 86400000) + 4) % 7
+      const m = (sums[r.merchant_name] ||= {})
+      const s = (m[d] ||= { sum: 0, n: 0 })
+      s.sum += changeOf(r)
+      s.n += 1
+    }
+    const byMerchant = {}
+    let delta = 0
+    let any = false
+    for (const [m, byDow] of Object.entries(sums)) {
+      const s = byDow[dow]
+      if (s && s.n >= 2) {
+        byMerchant[m] = s.sum / s.n
+        delta += s.sum / s.n
+        any = true
+      }
+    }
+    return { dayName, byMerchant, totalDelta: any ? delta : null }
+  }, [walletRows])
+
   const bankMoves = useMemo(
     () => visibleRecords.filter((r) => toNumber(r.bank_amount) > 0),
     [visibleRecords]
@@ -1792,6 +1959,7 @@ export default function App() {
         run: () => newEntry(m),
       })),
       { group: 'Go to', label: 'New entry', run: () => newEntry() },
+      { group: 'Go to', label: 'Batch EOD grid — log all merchants', run: () => openBatchGrid() },
       { group: 'Go to', label: 'Analytics', run: () => { setAnalyticsOpen(true); go('analytics')() } },
       { group: 'Go to', label: 'Reconciliation', run: () => { setAnalyticsOpen(true); go('recon')() } },
       { group: 'Go to', label: 'Saved balances table', run: go('records') },
@@ -1800,6 +1968,7 @@ export default function App() {
       { group: 'Go to', label: 'Calculator', run: () => setCalcOpen(true) },
       { group: 'Go to', label: 'Charge calculator', run: () => setChargeOpen(true) },
       { group: 'Action', label: 'Refresh records', run: () => loadRecords(filters) },
+      { group: 'Action', label: 'Share today summary on WhatsApp', run: () => shareEodSummary() },
       { group: 'Action', label: 'Customize dashboard', run: () => setDashOpen(true) },
       { group: 'Action', label: 'Toggle dark mode', run: () => applyTheme(dark ? 'light' : 'dark') },
       { group: 'Action', label: 'Print records', run: () => window.print() },
@@ -1846,8 +2015,91 @@ export default function App() {
   }
   const showSkel = loading && records.length === 0
   const todayStr = localToday()
-  const updatedToday = wallet.entries.filter((r) => r.balance_date === todayStr).length
-  const pendingToday = orderedMerchants.filter((m) => !wallet.entries.some((r) => r.merchant_name === m && r.balance_date === todayStr))
+  const pendingToday = orderedMerchants.filter((m) => !loggedByDate[todayStr]?.has(m))
+  const updatedToday = orderedMerchants.length - pendingToday.length
+
+  const shareEodSummary = () => {
+    const todayRows = walletRows.filter((r) => r.balance_date === localToday())
+    const bank = todayRows.reduce((t, r) => t + toNumber(r.bank_amount), 0)
+    const misc = todayRows.reduce((t, r) => t + toNumber(r.misc_expense), 0)
+    const lines = todayRows
+      .slice()
+      .sort((a, b) => a.merchant_name.localeCompare(b.merchant_name))
+      .map((r) => {
+        const ch = changeOf(r)
+        return `• ${r.merchant_name}: ${fmt(r.closing_balance, currency)} (${ch >= 0 ? '+' : '−'}${fmt(Math.abs(ch), currency)})`
+      })
+    const text = [
+      `*Daily Balance — ${displayDate(localToday())}*`,
+      `Wallet total: ${fmt(wallet.total, currency)}`,
+      `Today's change: ${wallet.todayChange >= 0 ? '+' : '−'}${fmt(Math.abs(wallet.todayChange), currency)}`,
+      bank ? `Moved to bank: ${fmt(bank, currency)}` : null,
+      misc ? `Misc expenses: ${fmt(misc, currency)}` : null,
+      pendingToday.length
+        ? `Pending: ${pendingToday.length} merchant${pendingToday.length === 1 ? '' : 's'}`
+        : `All ${merchants.length} merchants logged ✓`,
+      '',
+      ...lines,
+    ].filter(Boolean).join('\n')
+    const waBase = eodShare.phone ? `https://wa.me/${eodShare.phone}?text=` : 'https://wa.me/?text='
+    window.open(`${waBase}${encodeURIComponent(text)}`, '_blank')
+  }
+
+  const eodShareRef = useRef(null)
+  useEffect(() => {
+    eodShareRef.current = shareEodSummary
+  })
+
+  useEffect(() => {
+    if (!eodShare.enabled || !session?.user?.id) return
+    const tick = () => {
+      const now = new Date()
+      const nowMins = now.getHours() * 60 + now.getMinutes()
+      let firedTimes = []
+      try {
+        const f = JSON.parse(localStorage.getItem('lastEodSharePrompt'))
+        if (f && f.d === localToday() && Array.isArray(f.t)) firedTimes = f.t
+      } catch { /* legacy value */ }
+      const due = (eodShare.times || []).filter((t) => {
+        const [h, m] = t.split(':').map(Number)
+        return nowMins >= h * 60 + m && !firedTimes.includes(t)
+      })
+      if (!due.length) return
+      localStorage.setItem('lastEodSharePrompt', JSON.stringify({ d: localToday(), t: [...firedTimes, ...due] }))
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Daily Balance — summary ready', {
+          body: 'Open the app to share today’s summary on WhatsApp.',
+          icon: '/icon-192.png',
+          tag: 'eod-share-reminder',
+        })
+      }
+      notify('Your scheduled summary is ready — share it on WhatsApp?', 'info', {
+        label: 'Share summary',
+        fn: () => eodShareRef.current?.(),
+      })
+    }
+    const id = setInterval(tick, 60_000)
+    tick()
+    return () => clearInterval(id)
+  }, [eodShare.enabled, eodShare.times, session?.user?.id, notify])
+
+  useEffect(() => {
+    const userId = session?.user?.id
+    if (!supabase || !userId) return
+    const channel = supabase.channel(`presence:${userId}`, { config: { presence: { key: deviceId } } })
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        setPresenceCount(Object.keys(channel.presenceState() || {}).length)
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') channel.track({ at: Date.now() })
+      })
+    return () => {
+      channel.untrack()
+      supabase.removeChannel(channel)
+    }
+  }, [session?.user?.id, deviceId])
+
   const todayPct = merchants.length ? Math.min(100, Math.round((updatedToday / merchants.length) * 100)) : 0
   const brandLine = merchants.length
     ? `${TODAY_LABEL} · ${updatedToday} of ${merchants.length} merchant${merchants.length === 1 ? '' : 's'} updated today`
@@ -1991,6 +2243,28 @@ export default function App() {
     )
   }
 
+  if (counterPrivate) {
+    const mask = `${currency} ••••`
+    return (
+      <main className="wrap"><div className="card counter-view">
+        <h1>Counter privacy</h1>
+        <div className="actions"><strong>Total wallet: {mask}</strong>
+          <button type="button" className="secondary" onClick={togglePrivacy}><Eye size={16} /> Show balances</button>
+        </div>
+        <h2>Daily briefing</h2>
+        {walletError || walletLoading ? <p>{walletError || 'Loading merchant status…'}</p> : <>
+          <p>{updatedToday} of {merchants.length} logged today · {pendingToday.length} pending</p>
+          {pendingToday.length > 0 && <p>Still to log: {pendingToday.join(', ')}</p>}
+        </>}
+        <h2>Records</h2>
+        {visibleRecords.length ? <ul className="wallet-list">
+          {visibleRecords.map((row) => <li key={row.id}><div><strong>{row.merchant_name}</strong>
+            <span>{displayDate(row.balance_date)}</span></div><b>{mask}</b></li>)}
+        </ul> : <p>No records in this view.</p>}
+      </div></main>
+    )
+  }
+
   return (
     <div className="wrap" onTouchStart={onPullStart} onTouchMove={onPullMove} onTouchEnd={onPullEnd}>
       {pullDist > 30 && (
@@ -2013,11 +2287,13 @@ export default function App() {
                 type="button"
                 className={`brand-sub brand-sub-btn${todayPct === 100 ? ' is-complete' : ''}`}
                 aria-haspopup="dialog"
-                onClick={() => setPendingOpen(true)}
+                disabled={walletLoading || Boolean(walletError)}
+                onClick={() => openBatchGrid(todayStr, Boolean(pendingToday.length))}
               >
                 <span className="brand-progress-head">
                   <span>{brandLine}</span>
-                  <span className="brand-progress-pct">{todayPct === 100 ? 'All logged' : `${todayPct}%`}</span>
+                  <span className="brand-progress-pct">{walletLoading ? 'Loading' : walletError ? 'Unavailable'
+                    : pendingToday.length ? `Continue with ${pendingToday.length} pending` : 'Review today’s totals'}</span>
                 </span>
                 <span className="brand-progress-track" aria-hidden="true">
                   <span className="brand-progress-fill" style={{ width: `${todayPct}%` }} />
@@ -2048,6 +2324,9 @@ export default function App() {
                 <summary className="secondary"><MerchantAvatar name={session.user?.email || '?'} /> Account <ChevronDown size={14} /></summary>
                 <div className="menu-panel">
                   <span className="account-email">{session.user?.email}</span>
+                  {presenceCount > 1 && (
+                    <span className="account-email presence-note">{presenceCount} devices active</span>
+                  )}
                   {appLockCfg && (
                     <button type="button" className="secondary" onClick={() => setUnlockedUserId(null)}>
                       <Lock size={14} /> Lock app
@@ -2092,6 +2371,9 @@ export default function App() {
           </div>
         </div>
 
+        <div className="privacy-control no-print">
+          <button type="button" className="secondary small" onClick={togglePrivacy}><EyeOff size={16} /> Hide balances</button>
+        </div>
         <div className="stats no-print">
           {showSkel
             ? dashCfg.statOrder
@@ -2126,8 +2408,37 @@ export default function App() {
         </div>
 
         {status && <div className={`message ${status.type}`} role={status.type === 'error' ? 'alert' : 'status'}>{status.text}</div>}
+        <DailyBriefing
+          walletRows={walletRows}
+          merchants={merchants}
+          pendingToday={pendingToday}
+          chainBreaks={chainBreaks}
+          currency={currency}
+          onNewEntry={newEntry}
+          onOpenPending={() => setPendingOpen(true)}
+          onOpenBatch={() => openBatchGrid(todayStr, true)}
+          onGoRecon={go('recon')}
+        />
+        {presenceCount > 1 && (
+          <div className="presence-banner no-print" role="status">
+            <Smartphone size={14} aria-hidden="true" />
+            <span>This account is open on {presenceCount} devices — the newest save wins if you edit on both.</span>
+          </div>
+        )}
         <div className="workspace-actions no-print">
           <button type="button" className="primary" onClick={() => newEntry()}><Plus size={18} /> New Entry</button>
+          {merchants.length > 0 && (
+            <button
+              type="button"
+              className="secondary batch-open-btn"
+              onClick={() => openBatchGrid()}
+              title="Open spreadsheet EOD grid for all merchants (Ctrl+Alt+B)"
+            >
+              <Table2 size={17} />
+              <span>Batch EOD</span>
+              {pendingToday.length > 0 && <span className="batch-count-pill">{pendingToday.length}</span>}
+            </button>
+          )}
           <label className="record-search">
             <Search size={18} aria-hidden="true" />
             <input ref={searchInputRef} type="search" aria-label="Search loaded records by merchant, notes, or date" placeholder="Search records" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -2175,7 +2486,18 @@ export default function App() {
           <p>Each merchant’s latest recorded closing balance. Table filters do not affect this total.</p>
           {walletLoading && <p role="status">Loading wallet balances…</p>}
           {walletError && <div role="alert" className="message error">{walletError}</div>}
-          <button type="button" className="secondary" disabled={walletLoading} onClick={loadWallet}>Refresh wallet</button>
+          <div className="actions">
+            <button type="button" className="secondary" disabled={walletLoading} onClick={loadWallet}>Refresh wallet</button>
+            {merchants.length > 0 && (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => { setWalletOpen(false); openBatchGrid() }}
+              >
+                <Table2 size={15} /> Batch EOD{pendingToday.length > 0 ? ` (${pendingToday.length})` : ''}
+              </button>
+            )}
+          </div>
           {positiveTotal > 0 && (
             <div className="wallet-dist" aria-label="Wallet share by merchant">
               <div className="wallet-dist-bar">
@@ -2222,6 +2544,11 @@ export default function App() {
                     {wallet.bankByMerchant[row.merchant_name] > 0 && (
                       <span className="bank-line">Moved to bank: {fmt(wallet.bankByMerchant[row.merchant_name], currency)}</span>
                     )}
+                    {forecast.byMerchant[row.merchant_name] !== undefined && (
+                      <span className="forecast-line">
+                        Est. {forecast.dayName}: {fmt(toNumber(row.closing_balance) + forecast.byMerchant[row.merchant_name], currency)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="wallet-amt-col">
@@ -2264,6 +2591,9 @@ export default function App() {
             {wallet.bankTotal > 0 && (
               <div className="wallet-total-row"><span>Total Moved to Bank</span><strong>{fmt(wallet.bankTotal, currency)}</strong></div>
             )}
+            {forecast.totalDelta !== null && (
+              <div className="wallet-total-row forecast-total"><span>Est. {forecast.dayName} wallet</span><strong>{fmt(wallet.total + forecast.totalDelta, currency)}</strong></div>
+            )}
           </div>
         </AccessibleDialog>
         )
@@ -2273,7 +2603,16 @@ export default function App() {
         <AccessibleDialog title="Pending updates" onClose={() => setPendingOpen(false)}>
           {pendingToday.length ? (
             <>
-              <p>{pendingToday.length} merchant{pendingToday.length === 1 ? ' has' : 's have'} no entry for {displayDate(todayStr)}.</p>
+              <div className="pending-head-row">
+                <p>{pendingToday.length} merchant{pendingToday.length === 1 ? ' has' : 's have'} no entry for {displayDate(todayStr)}.</p>
+                <button
+                  type="button"
+                  className="small primary"
+                  onClick={() => { setPendingOpen(false); openBatchGrid(todayStr, true) }}
+                >
+                  <Table2 size={14} /> Open Batch Grid
+                </button>
+              </div>
               <ul className="wallet-list" aria-label="Merchants pending today's entry">
                 {pendingToday.map((m, i) => {
                   const last = wallet.entries.find((r) => r.merchant_name === m)
@@ -2421,11 +2760,49 @@ export default function App() {
         </AccessibleDialog>
       )}
 
+      {chooseEntry && (
+        <AccessibleDialog title="New entry" onClose={() => setChooseEntry(false)}>
+          <div className="actions">
+            <button type="button" className="primary" onClick={() => { setChooseEntry(false); newEntry() }}>Log one merchant</button>
+            <button type="button" className="secondary" disabled={walletLoading || Boolean(walletError)}
+              onClick={() => { setChooseEntry(false); openBatchGrid() }}>Close several merchants</button>
+          </div>
+        </AccessibleDialog>
+      )}
+      {batchOpen && (
+        <BatchGridModal
+          merchants={orderedMerchants}
+          pinnedMerchants={pinnedMerchants}
+          walletRows={walletRows}
+          initialBalances={initialBalances}
+          logoUrls={merchantLogoUrls}
+          currency={currency}
+          initialDate={batchDate}
+          initialPending={batchPending}
+          onBatchSave={saveBatchRecords}
+          onConfirm={askConfirm}
+          onClose={() => setBatchOpen(false)}
+        />
+      )}
+
       <div className="entry-overlay no-print" hidden={!entryOpen} onClick={(e) => { if (e.target === e.currentTarget) closeEntry() }}>
         <aside className="entry-panel" ref={entryRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="entry-title" aria-describedby="entry-description">
           <div className="entry-panel-head">
             <div><h2 id="entry-title">{editingRow ? 'Edit entry' : copySource ? 'Copy entry' : 'New entry'}</h2><p id="entry-description">Record the actual closing balance for this merchant.</p></div>
-            <button type="button" className="secondary icon-button" aria-label="Close entry panel" disabled={entryBusy} onClick={closeEntry}><X size={20} /></button>
+            <div className="entry-head-actions">
+              {!editingRow && merchants.length > 1 && (
+                <button
+                  type="button"
+                  className="secondary small"
+                  disabled={entryBusy}
+                  onClick={() => { setEntryOpen(false); openBatchGrid(selectDate) }}
+                  title="Switch to spreadsheet Batch EOD Grid"
+                >
+                  <Table2 size={14} /> Batch grid
+                </button>
+              )}
+              <button type="button" className="secondary icon-button" aria-label="Close entry panel" disabled={entryBusy} onClick={closeEntry}><X size={20} /></button>
+            </div>
           </div>
           <BalanceForm key={entryKey} merchants={orderedMerchants} pinnedMerchants={pinnedMerchants}
             loggedByDate={loggedByDate} indianFmt={indianFmt} initialBalances={initialBalances}
@@ -2462,7 +2839,7 @@ export default function App() {
           type="button"
           className={`bn-main${entryOpen ? ' active' : ''}`}
           aria-label="New entry"
-          onClick={() => { setNavActive('new'); newEntry() }}
+          onClick={() => setChooseEntry(true)}
         >
           <Plus size={20} />
           <span>New</span>
@@ -2544,6 +2921,29 @@ export default function App() {
               <input type="time" className="time-input" aria-label="Reminder time" value={reminder.time}
                 onChange={(e) => setReminder((r) => ({ ...r, time: e.target.value }))} disabled={!reminder.enabled} />
             </div>
+            <div className="reminder-group">
+              <Switch checked={eodShare.enabled} onChange={async (v) => {
+                if (v && 'Notification' in window && Notification.permission === 'default') {
+                  await Notification.requestPermission()
+                }
+                setEodShare((s) => ({ ...s, enabled: v }))
+              }} label="Remind me to share" />
+              <input type="time" className="time-input" aria-label="EOD summary time" value={eodShare.times[0] || '21:30'}
+                onChange={(e) => setEodShare((s) => ({ ...s, times: s.times.map((t, i) => (i === 0 ? e.target.value : t)) }))} disabled={!eodShare.enabled} />
+            </div>
+            {eodShare.times.slice(1).map((t, i) => (
+              <div className="reminder-group eod-time-row" key={i}>
+                <input type="time" className="time-input" aria-label={`EOD summary time ${i + 2}`} value={t}
+                  onChange={(e) => setEodShare((s) => ({ ...s, times: s.times.map((x, j) => (j === i + 1 ? e.target.value : x)) }))} disabled={!eodShare.enabled} />
+                <button type="button" className="eod-time-remove" aria-label="Remove this time" title="Remove"
+                  onClick={() => setEodShare((s) => ({ ...s, times: s.times.filter((_, j) => j !== i + 1) }))}>×</button>
+              </div>
+            ))}
+            {eodShare.enabled && eodShare.times.length < 4 && (
+              <button type="button" className="eod-time-add" onClick={() => setEodShare((s) => ({ ...s, times: [...s.times, '12:00'] }))}>+ Add another time</button>
+            )}
+            <ShareReminderStatus schedule={eodShare} onShare={shareEodSummary}
+              onPhone={(phone) => setEodShare((s) => ({ ...s, phone: normalizeWaPhone(phone) }))} />
           </div>
           {session && (
             <AppLockSettings

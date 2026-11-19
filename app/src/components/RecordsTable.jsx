@@ -876,25 +876,11 @@ export default function RecordsTable({
                         </div>
                         <div className="rc-nums">
                           <span className="muted">{row.balance_date}</span>
-                            {row.id === bestId && <span className="record-status">Highest change</span>}
-                            {row.id === worstId && <span className="record-status">Lowest change</span>}
-                            <span>
-                            Open <b>{fmt(row.opening_balance, currency)}</b>
-                            {chainBreaks.has(row.id) && <span className="adj-badge" data-tip={`Opening differs from previous closing (${fmt(chainBreaks.get(row.id), currency)})`}>Adj</span>}
-                          </span>
                           <span>
-                            Close <b>{fmt(row.closing_balance, currency)}</b>
+                            Closing <b>{fmt(row.closing_balance, currency)}</b>
                           </span>
                         </div>
-                        {(row.tags || []).length > 0 && (
-                          <div className="tag-list">
-                            {row.tags.map((t) => (
-                              <span key={t} className="tag-chip">{t}</span>
-                            ))}
-                          </div>
-                        )}
-                        {row.notes && <div className="muted">{row.notes}</div>}
-                        <button type="button" className="mobile-details-button" aria-haspopup="dialog" aria-label={`Details and actions for ${row.merchant_name} on ${row.balance_date}`} onClick={() => { setSwipedId(null); setDetailRow(row) }}><MoreHorizontal size={15} /> Details / Actions</button>
+                        <button type="button" className="mobile-details-button" aria-haspopup="dialog" aria-label={`View details for ${row.merchant_name} on ${row.balance_date}`} onClick={() => { setSwipedId(null); setDetailRow(row) }}><MoreHorizontal size={15} /> View details</button>
                       </div>
                     </div>
                   )
