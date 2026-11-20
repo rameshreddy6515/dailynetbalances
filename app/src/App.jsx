@@ -38,6 +38,7 @@ import {
   Calculator,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   FileText,
   Receipt,
   Search,
@@ -1960,6 +1961,7 @@ export default function App() {
       })),
       { group: 'Go to', label: 'New entry', run: () => newEntry() },
       { group: 'Go to', label: 'Batch EOD grid — log all merchants', run: () => openBatchGrid() },
+      { group: 'Go to', label: 'Review pending updates', run: () => setPendingOpen(true) },
       { group: 'Go to', label: 'Analytics', run: () => { setAnalyticsOpen(true); go('analytics')() } },
       { group: 'Go to', label: 'Reconciliation', run: () => { setAnalyticsOpen(true); go('recon')() } },
       { group: 'Go to', label: 'Saved balances table', run: go('records') },
@@ -2102,8 +2104,16 @@ export default function App() {
 
   const todayPct = merchants.length ? Math.min(100, Math.round((updatedToday / merchants.length) * 100)) : 0
   const brandLine = merchants.length
-    ? `${TODAY_LABEL} · ${updatedToday} of ${merchants.length} merchant${merchants.length === 1 ? '' : 's'} updated today`
+    ? `${TODAY_LABEL} · ${updatedToday} of ${merchants.length} logged`
     : 'Track opening balance, money moved to bank, miscellaneous expense, and the end-of-day wallet amount per merchant.'
+  const todayCents = Math.round(wallet.todayChange * 100)
+  const yesterdayCents = Math.round(wallet.yesterdayChange * 100)
+  const difference = todayCents - yesterdayCents
+  const comparison = difference === 0 ? 'Same net change as yesterday'
+    : todayCents > 0 && yesterdayCents > 0
+      ? `${fmt(Math.abs(difference) / 100, currency)} ${difference > 0 ? 'more' : 'less'} than yesterday’s gain`
+      : yesterdayCents === 0 ? 'Yesterday: no net change'
+      : `Yesterday: ${fmt(Math.abs(yesterdayCents) / 100, currency)} ${yesterdayCents > 0 ? 'gain' : 'loss'}`
   const statDefs = {
     wallet: { cls: 'stat-wallet', value: wallet.total, format: moneyFmt, lbl: 'Total Wallet', icon: <Wallet size={17} className="stat-icon" aria-hidden="true" /> },
     today: {
@@ -2113,8 +2123,8 @@ export default function App() {
       lbl: "Today's Change",
       icon: <TrendingUp size={17} className="stat-icon" aria-hidden="true" />,
       sub: wallet.hasYesterday ? (
-        <span className={`stat-sub ${wallet.todayChange - wallet.yesterdayChange >= 0 ? 'up' : 'down'}`}>
-          {wallet.todayChange - wallet.yesterdayChange >= 0 ? '▲' : '▼'} {fmt(Math.abs(wallet.todayChange - wallet.yesterdayChange), currency)} vs yesterday
+        <span className={`stat-sub${todayCents > 0 && yesterdayCents > 0 && difference ? (difference > 0 ? ' up' : ' down') : ''}`}>
+          {comparison}
         </span>
       ) : null,
     },
@@ -2249,7 +2259,7 @@ export default function App() {
       <main className="wrap"><div className="card counter-view">
         <h1>Counter privacy</h1>
         <div className="actions"><strong>Total wallet: {mask}</strong>
-          <button type="button" className="secondary" onClick={togglePrivacy}><Eye size={16} /> Show balances</button>
+          <button type="button" className="secondary" onClick={togglePrivacy}><EyeOff size={16} aria-hidden="true" /> Show balances</button>
         </div>
         <h2>Daily briefing</h2>
         {walletError || walletLoading ? <p>{walletError || 'Loading merchant status…'}</p> : <>
@@ -2282,26 +2292,6 @@ export default function App() {
                 <span className="brand-accent" aria-hidden="true" />
               </div>
             </div>
-            {merchants.length ? (
-              <button
-                type="button"
-                className={`brand-sub brand-sub-btn${todayPct === 100 ? ' is-complete' : ''}`}
-                aria-haspopup="dialog"
-                disabled={walletLoading || Boolean(walletError)}
-                onClick={() => openBatchGrid(todayStr, Boolean(pendingToday.length))}
-              >
-                <span className="brand-progress-head">
-                  <span>{brandLine}</span>
-                  <span className="brand-progress-pct">{walletLoading ? 'Loading' : walletError ? 'Unavailable'
-                    : pendingToday.length ? `Continue with ${pendingToday.length} pending` : 'Review today’s totals'}</span>
-                </span>
-                <span className="brand-progress-track" aria-hidden="true">
-                  <span className="brand-progress-fill" style={{ width: `${todayPct}%` }} />
-                </span>
-              </button>
-            ) : (
-              <p className="brand-sub">{brandLine}</p>
-            )}
           </div>
           <div className="page-nav no-print" role="navigation" aria-label="Page sections">
             <button type="button" className={sectionActive === 'records' ? 'active' : ''} onClick={go('records')} aria-label="Go to saved balances">
@@ -2357,6 +2347,8 @@ export default function App() {
             >
               {dark ? <Sun size={16} /> : <Moon size={16} />}
             </button>
+            <button type="button" className="secondary small icon-button" onClick={togglePrivacy}
+              aria-label="Hide balances" title="Hide balances"><Eye size={16} aria-hidden="true" /></button>
             <button
               type="button"
               className="secondary small icon-button"
@@ -2369,11 +2361,22 @@ export default function App() {
             </button>
           </div>
           </div>
+          <div className="closing-progress">
+            <span>{brandLine}</span>
+            {merchants.length > 0 && <>
+              <span className="brand-progress-track" aria-hidden="true">
+                <span className="brand-progress-fill" style={{ width: `${todayPct}%` }} />
+              </span>
+              <button type="button" className="small secondary" aria-haspopup="dialog"
+                disabled={walletLoading || Boolean(walletError)}
+                onClick={() => openBatchGrid(todayStr, Boolean(pendingToday.length))}>
+                {walletLoading ? 'Loading' : walletError ? 'Unavailable'
+                  : pendingToday.length ? `Continue with ${pendingToday.length} pending` : 'Review today’s totals'}
+              </button>
+            </>}
+          </div>
         </div>
 
-        <div className="privacy-control no-print">
-          <button type="button" className="secondary small" onClick={togglePrivacy}><EyeOff size={16} /> Hide balances</button>
-        </div>
         <div className="stats no-print">
           {showSkel
             ? dashCfg.statOrder
@@ -2395,7 +2398,7 @@ export default function App() {
                     {statDefs[k].icon}
                     <span className="num">{k === 'wallet' && walletLoading ? 'Loading…' : <CountUp value={statDefs[k].value} format={statDefs[k].format} />}</span>
                     <span className="lbl">{statDefs[k].lbl}</span>
-                    <span className="stat-link">{k === 'wallet' ? (walletError ? 'Refresh failed — view details' : 'View breakdown') : 'View details'}</span>
+                    <span className="stat-link">{k === 'wallet' ? (walletError ? 'Refresh failed — view details' : 'View breakdown') : 'View details'} <ChevronRight size={14} aria-hidden="true" /></span>
                   </button>
                 ) : (
                   <div key={k} className={`stat ${statDefs[k].cls}`}>
@@ -2415,8 +2418,6 @@ export default function App() {
           chainBreaks={chainBreaks}
           currency={currency}
           onNewEntry={newEntry}
-          onOpenPending={() => setPendingOpen(true)}
-          onOpenBatch={() => openBatchGrid(todayStr, true)}
           onGoRecon={go('recon')}
         />
         {presenceCount > 1 && (

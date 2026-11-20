@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, CalendarClock, CheckCircle2, ListTodo, Sparkles, TrendingUp, X } from 'lucide-react'
+import { AlertTriangle, CalendarClock, CheckCircle2, Sparkles, TrendingUp, X } from 'lucide-react'
 import { changeOf, fmt, latestWalletEntries, localToday } from '../format'
 
 const DAY_MS = 86400000
@@ -13,8 +13,6 @@ export default function DailyBriefing({
   chainBreaks,
   currency,
   onNewEntry,
-  onOpenPending,
-  onOpenBatch,
   onGoRecon,
 }) {
   const todayStr = localToday()
@@ -24,17 +22,6 @@ export default function DailyBriefing({
     const list = []
     const todayRows = walletRows.filter((r) => r.balance_date === todayStr)
     const dow = new Date(`${todayStr}T00:00:00`).getDay()
-
-    if (pendingToday.length) {
-      list.push({
-        key: 'pending',
-        tone: 'warn',
-        icon: ListTodo,
-        text: `${pendingToday.length} merchant${pendingToday.length === 1 ? '' : 's'} still need today's closing.`,
-        secondaryAction: onOpenBatch ? { label: 'Batch EOD', fn: onOpenBatch } : null,
-        action: { label: 'Review', fn: onOpenPending },
-      })
-    }
 
     if (chainBreaks && chainBreaks.size) {
       list.push({
@@ -98,11 +85,11 @@ export default function DailyBriefing({
       }
     }
 
-    if (!list.length && merchants.length && todayRows.length >= merchants.length) {
+    if (!list.length && merchants.length && !pendingToday.length) {
       list.push({ key: 'done', tone: 'ok', icon: CheckCircle2, text: `All ${merchants.length} merchants logged — day complete.` })
     }
     return list
-  }, [walletRows, merchants, pendingToday, chainBreaks, todayStr, currency, onNewEntry, onOpenPending, onOpenBatch, onGoRecon])
+  }, [walletRows, merchants, pendingToday, chainBreaks, todayStr, currency, onNewEntry, onGoRecon])
 
   if (dismissed || !insights.length) return null
 
@@ -124,11 +111,6 @@ export default function DailyBriefing({
           <li key={i.key} className={`briefing-item ${i.tone}`}>
             <i.icon size={14} aria-hidden="true" />
             <span className="briefing-text">{i.text}</span>
-            {i.secondaryAction && (
-              <button type="button" className="small primary briefing-action" onClick={i.secondaryAction.fn}>
-                {i.secondaryAction.label}
-              </button>
-            )}
             {i.action && (
               <button type="button" className="small secondary briefing-action" onClick={i.action.fn}>
                 {i.action.label}

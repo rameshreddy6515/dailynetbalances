@@ -794,7 +794,7 @@ code {
   background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.25), transparent 70%);
   pointer-events: none;
 }
-.stat:hover {
+.wallet-trigger:hover {
   transform: translateY(-5px) scale(1.01);
   box-shadow: 0 16px 35px -5px rgba(0, 0, 0, 0.45), 0 0 25px rgba(99, 102, 241, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.5);
   border-color: rgba(255, 255, 255, 0.35);
@@ -861,9 +861,6 @@ code {
   --stat-accent: var(--primary);
   background: linear-gradient(135deg, #1e1b4b 0%, #312e81 60%, #4338ca 100%);
   box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.3);
-}
-.stat-today:hover {
-  box-shadow: 0 16px 35px -5px rgba(99, 102, 241, 0.5), 0 0 30px rgba(99, 102, 241, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.5);
 }
 .stat:nth-child(6) {
   animation-delay: 0.25s;
@@ -2889,7 +2886,7 @@ tfoot td {
   box-shadow: none;
   padding: 20px;
 }
-.workspace .stat:hover {
+.workspace .wallet-trigger:hover {
   transform: none;
   border-color: color-mix(in srgb, var(--stat-accent, var(--focus)) 45%, var(--border));
   box-shadow: 0 8px 22px -8px color-mix(in srgb, var(--stat-accent, var(--focus)) 35%, transparent);
@@ -3271,6 +3268,8 @@ tfoot td {
 .accessible-dialog p { line-height: 1.5; }
 .wallet-trigger { display: block; width: 100%; text-align: left; font: inherit; }
 .wallet-trigger > span { display: block; }
+.wallet-trigger:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.wallet-trigger .stat-link { gap: 4px; }
 .stat-link { margin-top: 10px; color: var(--focus); font-size: 13px; text-decoration: underline; }
 .wallet-list { list-style: none; padding: 0; margin: 16px 0; }
 .wallet-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); animation: row-in 0.25s ease both; }
@@ -4423,7 +4422,7 @@ body::after {
   -webkit-backdrop-filter: blur(20px) saturate(1.3);
   backdrop-filter: blur(20px) saturate(1.3);
 }
-.workspace .stat:hover {
+.workspace .wallet-trigger:hover {
   transform: translateY(-4px);
   box-shadow: 0 22px 48px rgba(0, 0, 0, 0.2), 0 0 28px color-mix(in srgb, var(--stat-accent, var(--primary)) 24%, transparent), inset 0 1px 0 var(--glass-highlight);
 }
@@ -4777,7 +4776,7 @@ body::after {
   backdrop-filter: blur(20px) saturate(1.3);
   padding: 18px 18px 16px;
 }
-.workspace .stat:hover {
+.workspace .wallet-trigger:hover {
   transform: translateY(-3px);
   box-shadow: 0 20px 44px rgba(0, 0, 0, 0.18), 0 0 24px color-mix(in srgb, var(--stat-accent, var(--primary)) 18%, transparent), inset 0 1px 0 var(--glass-highlight);
 }
@@ -4871,7 +4870,7 @@ body::after {
   border-color: rgba(255, 255, 255, 0.14);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 36px rgba(0, 0, 0, 0.18);
 }
-:root[data-theme='dark'] .workspace .stat:hover {
+:root[data-theme='dark'] .workspace .wallet-trigger:hover {
   box-shadow: 0 22px 48px rgba(0, 0, 0, 0.22), 0 0 24px color-mix(in srgb, var(--stat-accent, var(--primary)) 22%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 :root[data-theme='dark'] .workspace .stat-link {
@@ -6874,8 +6873,6 @@ dialog.accessible-dialog.batch-grid-dialog {
   display: grid; gap: 8px; padding: 12px; margin-top: 10px;
   border-inline-start: 3px solid var(--primary); background: var(--secondary-bg);
 }
-.brand-progress-head { flex-wrap: wrap; }
-.privacy-control { display: flex; justify-content: flex-end; margin-top: 8px; }
 .counter-view { max-width: 48rem; margin-inline: auto; padding: clamp(16px, 4vw, 32px); }
 .counter-view .wallet-list li { align-items: center; }
 
@@ -6989,4 +6986,50 @@ dialog.accessible-dialog.batch-grid-dialog {
   }
   .batch-actions { flex-wrap: wrap; }
   .batch-actions > span { flex-basis: 100%; }
+}
+
+/* One header surface; only interactive controls keep their own highlights. */
+.closing-progress {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.closing-progress .brand-progress-track { width: clamp(64px, 10vw, 140px); }
+.workspace .closing-progress button.small { min-height: 32px; padding: 4px 10px; }
+.workspace .topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px 18px;
+  padding: clamp(14px, 1.7vw, 22px);
+  border: 1px solid var(--glass-edge);
+  border-radius: 24px;
+  background: linear-gradient(115deg, var(--glass-highlight), transparent 55%), var(--glass-panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.07);
+}
+:root .workspace .topbar :is(.brand, .page-nav, .header-controls .header-primary) {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+@media (max-width: 900px) {
+  .workspace .topbar { grid-template-columns: minmax(0, 1fr) auto; }
+}
+@media (max-width: 640px) {
+  .workspace .topbar { grid-template-columns: minmax(0, 1fr); }
+  .workspace .topbar .header-primary { display: flex; flex-wrap: wrap; justify-content: flex-start; }
+  .workspace .topbar .header-controls {
+    box-sizing: border-box;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
 }
