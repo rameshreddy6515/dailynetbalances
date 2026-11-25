@@ -894,6 +894,13 @@ export default function RecordsTable({
                   {totals.change >= 0 ? '+' : '−'}
                   {fmt(Math.abs(totals.change), currency)}
                 </b>
+                {(totals.misc > 0 || totals.bank > 0) && (
+                  <span className="mobile-totals-extra">
+                    {totals.misc > 0 && <>Misc <b>{fmt(totals.misc, currency)}</b></>}
+                    {totals.misc > 0 && totals.bank > 0 && ' · '}
+                    {totals.bank > 0 && <>To Bank <b>{fmt(totals.bank, currency)}</b></>}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -903,6 +910,19 @@ export default function RecordsTable({
               {!loading &&
                 `Showing ${pageRows.length} of ${records.length} record${records.length === 1 ? '' : 's'}${filters.merchant ? ` for ${filters.merchant}` : ''}${filters.from || filters.to ? ` (${filters.from || '…'} → ${filters.to || '…'})` : ''}.`}
             </div>
+            {!loading && records.length > 0 && (
+              <div className="totals-summary" aria-label="Totals for records in view">
+                <span>
+                  Change{' '}
+                  <b className={totals.change >= 0 ? 'pos' : 'neg'}>
+                    {totals.change >= 0 ? '+' : '−'}{fmt(Math.abs(totals.change), currency)}
+                  </b>
+                </span>
+                {totals.misc > 0 && <span>Misc <b>{fmt(totals.misc, currency)}</b></span>}
+                {totals.bank > 0 && <span>To Bank <b>{fmt(totals.bank, currency)}</b></span>}
+                {totals.cashOut > 0 && <span>Cash Out <b className="neg">−{fmt(Math.abs(totals.cashOut), currency)}</b></span>}
+              </div>
+            )}
             {totalPages > 1 && (
               <div className="pager">
                 <button type="button" className="secondary small" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>

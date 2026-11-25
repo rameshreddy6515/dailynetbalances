@@ -1261,6 +1261,25 @@ tr.row-worst td:first-child {
   gap: 10px;
   margin-top: 10px;
 }
+.totals-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.totals-summary b {
+  color: inherit;
+}
+.totals-summary b.pos,
+.totals-summary b.neg {
+  font-weight: 700;
+}
+.mobile-totals-extra {
+  flex-basis: 100%;
+  font-size: 12px;
+}
 .pager {
   display: flex;
   align-items: center;

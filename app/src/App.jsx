@@ -77,6 +77,7 @@ const DEFAULT_CFG = {
   statHidden: ['misc', 'entries'],
   sectionOrder: ['charts', 'leaderboard', 'recon'],
   sectionHidden: [],
+  layout: 'stacked',
 }
 const DEFAULT_ACCOUNT_PREFERENCES = {
   theme: 'system',
@@ -118,6 +119,7 @@ function normalizeDashboardConfig(value, fallback = DEFAULT_CFG) {
     statHidden: normalizeHidden('statHidden', 'statOrder', fallback.statHidden),
     sectionOrder: normalizeOrder('sectionOrder', fallback.sectionOrder),
     sectionHidden: normalizeHidden('sectionHidden', 'sectionOrder', fallback.sectionHidden),
+    layout: source.layout === 'split' ? 'split' : fallback.layout,
   }
 }
 
@@ -187,6 +189,10 @@ const SECTION_LABELS = {
   charts: 'Charts',
   leaderboard: 'Merchant leaderboard',
   recon: 'Reconciliation',
+}
+const DASH_LAYOUT_LABELS = {
+  stacked: 'Stacked',
+  split: 'Split layout',
 }
 const ACCENTS = [
   { value: 'indigo', label: 'Indigo', swatch: 'linear-gradient(135deg,#4f46e5,#7c3aed)' },
@@ -2218,6 +2224,8 @@ export default function App() {
     ),
   }
 
+  const analyticsSectionKeys = dashCfg.sectionOrder.filter((k) => sectionNodes[k] && !dashCfg.sectionHidden.includes(k))
+
   if (supabase && !authReady) {
     return (
       <div className="wrap">
@@ -2456,7 +2464,11 @@ export default function App() {
           </div>
           <div id="analytics-content" className={`collapse${analyticsOpen ? '' : ' closed'}`}>
             <div className="collapse-inner">
-              {analyticsOpen && dashCfg.sectionOrder.map((k) => sectionNodes[k] && !dashCfg.sectionHidden.includes(k) && sectionNodes[k])}
+              {analyticsOpen && (
+                <div className={`analytics-stack${dashCfg.layout === 'split' ? ' split' : ''}`}>
+                  {analyticsSectionKeys.map((k) => sectionNodes[k])}
+                </div>
+              )}
               {analyticsOpen && !loading && !visibleRecords.length && <p>No records match this view. Adjust the filters to see analytics.</p>}
             </div>
           </div>
@@ -2890,6 +2902,7 @@ export default function App() {
         cfg={dashCfg}
         statLabels={STAT_LABELS}
         sectionLabels={SECTION_LABELS}
+        layoutLabels={DASH_LAYOUT_LABELS}
         onChange={setDashCfg}
         onReset={() => setDashCfg(DEFAULT_CFG)}
         onClose={() => setDashOpen(false)}

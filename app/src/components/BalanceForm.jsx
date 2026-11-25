@@ -20,7 +20,7 @@ const blank = () => ({
   notes: '',
 })
 
-const SUGGESTED_TAGS = ['settlement', 'correction', 'misc', 'refund']
+const SUGGESTED_TAGS = ['settlement', 'correction', 'misc', 'refund', 'own-expenses']
 
 const parseTags = (value) =>
   [...new Set(String(value || '')
